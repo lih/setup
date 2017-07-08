@@ -15,7 +15,7 @@ Install and first use
 ---------------
 
 Since it's basically just a Bash script, you can start using Setup
-from your shell by simply sourcing the [lib/setup.shl] file (if you
+from your shell by simply sourcing the [lib/setup.shl]() file (if you
 are using Bash, that is).
 
 This file defines two functions, `prepare` and `setup`, whose job it
