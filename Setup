@@ -1,0 +1,17 @@
+#!/usr/bin/setup
+# -*- mode: shell-script -*-
+DIST=.dist
+function Tar() {
+    local re="${2#-}" dst="$1"
+    shift 2
+    mkpdir "$dst"
+    tar -czf "$dst" --transform="$re" "$@"
+}
+case "$1" in
+    ''|install)
+	for file in $(find bin lib -type f); do
+	    prepare "$DIST/$file" = Copy "$file"
+	done
+	;;
+    package) prepare "$DIST/package.tar.gz" = Tar -"s,^$SETUP_PREFIX,usr/," $(find bin lib -type f);;
+esac

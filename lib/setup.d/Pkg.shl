@@ -1,0 +1,139 @@
+#!/bin/bash
+PKG_PREF="/$SETUP_PREFIX"
+PKG_BUILD="${PKG_PREF}.build"
+PKG_SRC="${PKG_PREF}src"
+PKG_ETC="${PKG_PREF}etc"
+
+function Pkg.pacman.Installer() {
+    mkpdir "$1"
+    local file="$(< "$2")"
+
+    if [ "$file" ]; then
+	cat <<EOF
+function post_install() { $file install "\$1"; }
+function pre_upgrade() { $file pre-upgrade "\$2"; }
+	 
+function post_upgrade() { $file post-upgrade "\$2"; }
+function pre_remove() { $file uninstall "\$1"; }
+EOF
+    fi > "$1"
+
+}
+function Pkg.pacman.PkgBuild() {
+    local dest="$1"
+    shift
+    local -a aliases=( $(< "$1") )
+    shift
+    local name="${1#-}" version="$(< "$2")" rev="$(< "$3")"
+    shift 3
+    local author="$(< "$1")" email="$(< "$2")"
+    shift 2
+    local description="$(< "$1")" arch="$(< "$2")" depends_file="$3" replaces_file="$4"
+    shift 4
+    local srcar="$1"
+    shift
+    local postinst="${1##*/}"
+    shift
+
+    declare -A lookup
+    for a in "${aliases[@]}"; do
+	lookup[${a%%@*}]="${a#*@}"
+    done
+    for dep in $(cat "$depends_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+
+	depends+=( "'${lookup[$d]:-$d${minbound:+>=$minbound}}'" )
+    done
+    for dep in $(cat "$replaces_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+
+	replaces+=( "'${lookup[$d]:-$d${minbound:+>=$minbound}}'" )
+    done
+
+    declare -A archs=(
+	[x64]=x86_64 [x86_64]=x86_64 [amd64]=x86_64
+	[x86]=x86    [i386]=x86
+	[all]=any    [any]=any
+    )
+
+    mkpdir "$dest"
+    cat > "$dest" <<EOF
+# Maintainer: $author <$email>
+pkgname=$name
+pkgver=$version
+pkgrel=$rev
+pkgdesc="$description"
+arch=( ${archs[$arch]} )
+license=('GPL')
+packager="$author <$email>"
+groups=()
+depends=( ${depends[@]} )
+makedepends=()
+optdepends=()
+provides=()
+conflicts=()
+replaces=( ${replaces[@]} )
+backup=()
+options=( '!upx' )
+install=
+changelog=
+source=( source.tar.gz )
+noextract=()
+install=$postinst
+
+build() {
+  :
+}
+
+package() {
+  cd "\$srcdir"
+
+  rsync -a ./ --exclude 'source.tar.gz' "\$pkgdir"
+}
+EOF
+}
+function Pkg.pacman.TarXZ() {
+    local dest="$SETUP_ROOT/$1"
+    shift
+    local dir="${2%/*}"
+    cp "$1" "$dir/source.tar.gz"
+    (
+	cd "$dir"
+	makepkg -g >> PKGBUILD \
+	    && makepkg -fd \
+	    && {
+		mkpdir "$dest"
+		rm -f "$dest"
+		mv *.pkg.tar.[xg]z "$dest"
+	    }
+    )
+}
+
+function Pkg.bundle.pacman() {
+    prepare "$PKG_BUILD/pacman/$1/package.install" = Pkg.pacman.Installer "$PKG_SRC/$1/installer"
+    prepare "$PKG_BUILD/pacman/$1/PKGBUILD" = \
+	    Pkg.pacman.PkgBuild "$PKG_ETC/aliases.pacman" -"$1" \
+	    "$PKG_SRC/$1/"{version,revision,maintainer-name,maintainer-email,description,architecture,dependencies,replaces,.dist/package.tar.gz} \
+	    "$PKG_BUILD/pacman/$1/package.install"
+    prepare "$2" = Pkg.pacman.TarXZ "$PKG_SRC/$1/.dist/package.tar.gz" "$PKG_BUILD/pacman/$1/PKGBUILD"
+}
+function Pkg.auto_files() {
+    {
+	[[ "$1" =~ ^("$PKG_BUILD")/([^/]*)/([^/]*)/(.*) ]] && {
+	    local root="${BASH_REMATCH[1]}" pkgtype="${BASH_REMATCH[2]}" pkgname="${BASH_REMATCH[3]}" path="${BASH_REMATCH[4]}"
+	    case "$path" in
+		package.bundle) Pkg.bundle."$pkgtype" "$pkgname" "$1";;
+		*) return 1;;
+	    esac
+	}
+    } || {
+	[[ "$1" =~ ^"$PKG_SRC"/([^/]*)/(version|revision|maintainer(-name|-email)|description|architecture|dependencies|replaces|installer) ]] && {
+	    prepare "$1" = Empty
+	}
+    }
+}
+Setup.addHooks Pkg.auto_files

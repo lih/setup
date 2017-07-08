@@ -1,0 +1,20 @@
+#!/bin/bash
+function gcc-c() { sleep 2; gcc -c "$2" ${SRCDIR:+-I"$SRCDIR"} -o "$1"; }
+function ld-o() { gcc -o "$1" "${@:2}"; }
+function c-includes() { sed 's,#include "(.*)",'"${SRCDIR:+$SRCDIR/}"'\1,p' -rn "$2" > "$1"; }
+
+function C.auto_o() {
+    [[ "$1" == *.o ]] && {
+        local baseName="${1%.o}.c"
+        local sourceName="${baseName/#$BUILDDIR/$SRCDIR}"
+        prepare "$1" = gcc-c "$sourceName" @"$baseName.incs"
+    }
+}
+function C.auto_includes() {
+    [[ "$1" == *.incs ]] && {
+        local sourceName="${1/#$BUILDDIR/$SRCDIR}"
+        prepare "$1" = c-includes "${sourceName%.incs}"
+    } 
+}
+
+Setup.addHooks C.auto_o C.auto_includes

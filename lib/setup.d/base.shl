@@ -1,0 +1,21 @@
+#!/bin/bash
+function mkpdir() { mkdir -p $(dirname "$@"); }
+
+function Foreach() {
+    local word dst="$1" pat="${2#-}"
+    shift 2
+    mkpdir "$dst"
+    local file
+    for file; do
+	for word in $(< "$file"); do
+	    eval "printf '%s\n' \"$pat\""
+	done
+    done > "$dst"
+}
+function Echo() { local dst="$1"; shift; mkpdir "$dst"; printf "%s\n" "${@#-}" > "$dst"; }
+function Copy() { mkpdir "$1"; cp "$2" "$1"; }
+function Concat() { mkpdir "$1"; cat "${@:2}" > "$1"; }
+function Sorted() { mkpdir "$1"; cat "${@:2}" | LC_ALL=C sort -u > "$1"; }
+function Lookup() { mkpdir "$1"; set -o pipefail; LC_ALL=C look -t: "${2#-}" "$3" | head -1 | cut -d: -f2 > "$1"; }
+function Empty() { mkpdir "$1"; printf '' > "$1"; }
+function Filter() { mkpdir "$1"; grep $4 -xf "$3" "$2" > "$1"; return 0; }

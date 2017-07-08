@@ -1,0 +1,306 @@
+#!/bin/bash
+declare -ga SETUP_AUTO_DEPEND_HOOKS=( )
+declare -g JOBS=8
+
+declare -gA SETUP_MODULES=( )
+declare -ga SETUP_FAILED
+declare -gA SETUP_STATE
+SETUP_ROOT="$PWD"
+SETUP_PREFIX=''
+SETUP_TMPDIR="$(mktemp -d)"
+mkfifo "$SETUP_TMPDIR"/{worker,master}_{sem,stream,mutex}
+exec 3<>"$SETUP_TMPDIR"/worker_sem 4<>"$SETUP_TMPDIR"/worker_stream 5<>"$SETUP_TMPDIR"/worker_mutex \
+     6<>"$SETUP_TMPDIR"/master_sem 7<>"$SETUP_TMPDIR"/master_stream 8<>"$SETUP_TMPDIR"/master_mutex
+SETUP_WORKER='3 4 5'
+SETUP_MASTER='6 7 8'
+printf . >&5 & printf . >&8 &
+
+if [ "${SETUP_LOGLEVEL:-0}" -gt 0 ]; then
+    function Setup.log.INFO() { printf "[INFO:${BASHPID:-$$}]: %s\n" "$*" >&2; }
+else
+    function Setup.log.INFO() { :; }
+fi
+function Setup.log.CRIT() { printf "[CRIT:${BASHPID:-$$}]: %s\n" "$*" >&2; }
+function Setup.log() { Setup.log."$1" "${@:2}"; }
+function Setup.trace() { Setup.log INFO "$@" >&2; "$@"; }
+
+function Setup.dumpState() {
+    local k
+    for k in "${!SETUP_STATE[@]}"; do
+        echo "$k: ${SETUP_STATE[$k]}"
+    done | sort
+}
+function Setup.addArr() {
+    local arr="$1" i="${SETUP_STATE[$1.n]:-0}" arg
+    shift
+    for arg; do
+        SETUP_STATE[$arr.$i]="$arg"
+        ((i++))
+    done
+    SETUP_STATE[$arr.n]=$i
+}
+function Setup.setArr() {
+    local arr="$1" i=0 arg
+    shift
+    for arg; do
+        SETUP_STATE[$arr.$i]="$arg"
+        ((i++))
+    done
+    SETUP_STATE[$arr.n]=$i
+}
+function Setup.getArr() {
+    local __var="$1" __arr="$2" n i
+    n="${SETUP_STATE[$__arr.n]:-0}"
+    shift 2
+    
+    eval "$__var=( )"
+    for ((i=0;i<n;i++)); do
+        eval "$__var+=( \"\${SETUP_STATE[\$__arr.$i]}\" )"
+    done    
+}
+function Setup.setVal() { SETUP_STATE[$1]="$2"; }
+
+function Setup.receive() {
+    read -u"$1" -n1 \
+        && read -r -u"$2" "$4"
+    local ret="$?"
+    printf . >&"$3" &
+    return "$ret"
+}
+function Setup.send() {
+    (
+        read -u"$3" -n1
+        printf . >&"$1"
+        if [ -n "$5" ]; then printf "${@:5}"; fi
+        printf "%s\n" "$4" >&"$2"
+    ) &
+}
+
+function Setup.runDependHooks() {
+    [ "${SETUP_STATE[$1.can]:+x}" == x ] || {
+	for hook in "${SETUP_AUTO_DEPEND_HOOKS[@]}"; do
+	    "$hook" "/$1" && return
+        done
+        false
+    } || {
+        [ -e "$SETUP_ROOT/$1" ] && SETUP_STATE[$1.can]="$1" && SETUP_STATE[$1.status]=2:done
+    } || {
+        Setup.log CRIT "Missing dependency: $1"
+        return 1
+    }
+}
+function Setup.primeCan() {
+    local argc=0 arg can="$1"
+    local -a args=( ) newargs fullargs=( )
+    Setup.getArr args "$can.args"
+    for arg in "${args[@]}"; do
+        case "$arg" in
+            @*)
+		newargs=( $(< "${arg#@}") )
+		Setup.addPrefix newargs
+		fullargs+=( "${newargs[@]}" );;
+            *)  fullargs+=( "$arg" );;
+        esac
+    done
+    for arg in "${fullargs[@]}"; do
+        case "$arg" in
+            -*) ;;
+            *)
+                Setup.runDependHooks "$arg" || {
+                    local ret="$?"
+                    Setup.log CRIT "  - needed for $can"
+                    return "$ret"
+                }
+                arg="${SETUP_STATE[$arg.can]}"
+                if [ "${SETUP_STATE[$arg.status]}" != 2:done ]; then
+                    Setup.addArr "$arg.next-primed" "$can"
+                    ((argc++))
+                fi
+                ;;
+        esac
+    done
+    Setup.setVal "$can.argc" "$argc"
+    Setup.setVal "$can.status" 1:primed
+    Setup.setArr "$can.args" "${fullargs[@]}"
+    if ((argc == 0)); then
+        LEAVES+=( "$can" )
+    fi
+}
+function Setup.isUpToDate() {
+    local dst="$1" arg; shift
+    for arg; do
+        if [[ "$arg" != :* ]] && [ "$SETUP_ROOT/$dst" -ot "$SETUP_ROOT/$arg" ]; then return 1; fi
+    done
+    [ -e "$SETUP_ROOT/$dst" ]
+}
+function Setup.runLeaves() {
+    local leaf
+    local -a args dst
+    for leaf in "${LEAVES[@]}"; do
+        Setup.getArr args "$leaf.args"
+        Setup.getArr dst "$leaf.targets"
+        if Setup.isUpToDate "$dst" "${args[@]}"; then
+            Setup.send $SETUP_MASTER "$leaf 0"
+        else
+            local -a cmd=( "${SETUP_STATE[$leaf.cmd]}" "${dst[@]}" "${args[@]}" )
+            cmd=( "${cmd[@]//\'/\'\\\'\'}" )
+            cmd=( "${cmd[@]/%/\'}" )
+            cmd=( "${cmd[@]/#/\'}" )
+            Setup.send $SETUP_WORKER "$leaf ${cmd[*]}" '%-20s %s\n' "${SETUP_STATE[$leaf.cmd]}" "${dst[*]}"
+        fi
+    done
+    LEAVES=( )
+}
+function Setup.atexit() { rm -rf "$SETUP_TMPDIR"; }
+
+function Setup.addPrefix() {
+    local __arr="$1"
+    if [ -n "$SETUP_PREFIX" ]; then
+	eval '
+'$__arr'=( "${'$__arr'[@]/#//}" )
+'$__arr'=( "${'$__arr'[@]/#\/-/-}" )
+'$__arr'=( "${'$__arr'[@]/#\/@\//@}" )
+'$__arr'=( "${'$__arr'[@]/#\/\//}" )
+'$__arr'=( "${'$__arr'[@]/#\/@/@$SETUP_PREFIX}" )
+'$__arr'=( "${'$__arr'[@]/#\//$SETUP_PREFIX}" )
+'
+    else
+	eval '
+'$__arr'=( "${'$__arr'[@]/#\//}" )
+'$__arr'=( "${'$__arr'[@]/#@\//@}" )
+'
+    fi
+}
+# Usage : prepare file... = cmd [file|@file|:tag]...
+function prepare() {
+    local -a targets
+    while [ "$1" != '=' ]; do
+        targets+=( "$1" )
+        shift
+    done
+    shift
+    Setup.addPrefix targets
+    local can="$targets" arg tgt depc=0
+    Setup.setArr "$can.targets" "${targets[@]}"
+    for tgt in "${targets[@]}"; do
+        Setup.setVal "$tgt.can" "$can"
+    done
+    Setup.setVal "$can.cmd" "$1"
+    shift
+    local -a args=( "$@" )
+    Setup.addPrefix args
+    Setup.setArr "$can.args" "${args[@]}"
+    for arg in "${args[@]}"; do
+        if [[ "$arg" == @* ]]; then
+            arg="${arg#@}"
+            Setup.runDependHooks "$arg" || {
+                local ret="$?"
+                Setup.log CRIT "  - needed for $can"
+                return "$ret"
+            }
+            arg="${SETUP_STATE[$arg.can]}"
+            if [ "${SETUP_STATE[$arg.status]}" != 2:done ]; then
+                Setup.addArr "$arg.next-defined" "$can"; ((depc++))
+            fi
+        fi
+    done
+    if ((depc > 0)); then
+        Setup.setVal "$can.depc" "$depc"
+        Setup.setVal "$can.status" 0:defined
+    else
+        Setup.primeCan "$can"
+    fi
+}
+# Usage: setup file...
+function setup() {
+    local -a workers=( )
+    for ((i=0;i<JOBS;i++)); do
+        (
+            while Setup.receive $SETUP_WORKER msg; do
+                Setup.log INFO "[WORKER $i] Received $msg"
+                key="${msg%% *}"
+		logfile="$SETUP_TMPDIR/log/$key.log"
+		mkdir -p "$(dirname "$logfile")"
+                eval "${msg#* }" >"$logfile" 2>&1
+                Setup.trace Setup.send $SETUP_MASTER "$key $?"
+            done
+        ) & workers+=( "$!" )
+    done
+
+    local -a args=( "$@" )
+    Setup.addPrefix args
+    local arg
+    for arg in "${args[@]}"; do Setup.runDependHooks "$arg" || return; done
+    
+    local nl="${#LEAVES[@]}" can stat ret=0
+    Setup.runLeaves
+    while ((nl>0)) && Setup.receive $SETUP_MASTER msg; do
+        Setup.log INFO "[MASTER] received $msg"
+        can="${msg%% *}"
+        stat="${msg#* }"
+        SETUP_STATE[$can.status]='2:done'
+        ((nl--))
+        case "$stat" in
+	    0)
+                local -a nexts
+                local x depc argc
+                Setup.getArr nexts "$can.next-defined"
+                for x in "${nexts[@]}"; do
+		    depc="${SETUP_STATE[$x.depc]}"
+		    SETUP_STATE[$x.depc]="$((depc-1))"
+		    if ((depc == 1)); then
+                        Setup.primeCan "$x"
+		    fi
+                done
+
+                Setup.getArr nexts "$can.next-primed"
+                for x in "${nexts[@]}"; do
+		    argc="${SETUP_STATE[$x.argc]}"
+		    SETUP_STATE[$x.argc]=$((argc-1))
+		    if ((argc == 1)); then
+                        LEAVES+=( "$x" )
+		    fi
+                done
+
+                ((nl+=${#LEAVES[@]}))
+                Setup.runLeaves
+                ;;
+	    *)
+                local -a tgts
+		SETUP_STATE[$can.errno]="$stat"
+		SETUP_FAILED+=( "$can" )
+                Setup.getArr tgts "$can.targets"
+                rm -f "${tgts[@]}"
+                ret=1
+                ;;
+        esac
+    done
+
+    {
+        kill "${workers[@]}"
+        wait "${workers[@]}"
+    } >/dev/null 2>&1
+
+    return "$ret"
+}
+
+function Setup.addHooks() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
+function Setup.import() {
+    local mod
+    for mod; do
+	if [ "${SETUP_MODULES[$mod]:+x}" == '' ]; then
+	    source "$SETUP_INSTALL_DIR/lib/setup.d/${mod%.shl}.shl"
+	    SETUP_MODULES[$mod]=true
+	fi
+    done
+}
+function Setup.load() {
+    local path="${1%/*}" file="${1##*/}"
+    shift
+    local SETUP_PREFIX="$SETUP_PREFIX$path/"
+    pushd "$path" >/dev/null
+    source "$file"
+    popd >/dev/null
+}
+
+trap Setup.atexit EXIT

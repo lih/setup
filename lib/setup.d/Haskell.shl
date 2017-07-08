@@ -1,0 +1,229 @@
+#!/bin/bash
+HS_PREFIX=/${SETUP_PREFIX}
+
+
+BUILD=${HS_PREFIX}.build
+ETC=${HS_PREFIX}etc
+BIN=${HS_PREFIX}.dist/bin
+SRC=${HS_PREFIX}src
+PKG=$BUILD/package
+DEP=$BUILD/deps
+CONF=$BUILD/conf
+POOL=$BUILD/pool
+OBJ=$BUILD/obj
+LOG=$BUILD/log
+
+GHC_VERSION="$(ghc --version)"
+GHC_VERSION="${GHC_VERSION#* version }"
+GHC_VNUM="${GHC_VERSION:0:1}${GHC_VERSION:2:2}"
+
+function Hackage.get() {
+    local pkg="${2#-}"
+    mkpdir "$1"
+    curl -Ls http://hackage.haskell.org/package/"$pkg"/"$pkg".tar.gz > "$1"
+}
+
+function Tar.find() {
+    mkpdir "$1"
+    tar -tzf "$3" | grep -e "${2#-}" > "$1"
+}
+function Tar.get() {
+    mkpdir "$1"
+    tar -xzOf "$2" "$(< "$3")" > "$1"
+}
+
+function Cabal.section() {
+    local field="${2#-}"
+    mkpdir "$1"
+    local text="$(sed -rn '/^\s*--/d;/^library/I,/^\S/{/^\S/!{/^\s+'"$field"':/I,/:|\bif\b/{s/'"$field"'://i;/:|\bif\b|^\s*--/!p}}}' "$3")"
+    if [ -n "$4" ]; then
+	local IFS="$IFS${4#-}"
+    fi
+    printf "%s\n" $text > "$1"
+}
+
+function HS.isLocalMod() {
+    local modpath=( "$SETUP_ROOT$SRC/"*/*"/source/$1.hs" )
+    [ -e "$modpath" ] && {
+	modpath="${modpath#$SETUP_ROOT$SRC/}"
+	HS_MOD_PATH="${modpath%/source/*}"
+    }
+}
+function HS.pp() {
+    mkpdir "$1"
+    set -o pipefail
+    grep -v '^\s*#-' "$2" | cpp -DWORLD_IMPORTS -w -include "$3" >"$1"
+}
+function HS.cc() {
+    mkpdir "$1"
+    ghc -c -I"$SETUP_ROOT$POOL" "$2" -o "$1"
+}
+function HS.depends() {
+    mkpdir "$1"
+    sed -rn 's/^import(\s+qualified)?\s+([A-Za-z0-9_.]+).*$/\2/p' "$2" | grep -vxf "$3" > "$1" || :
+}
+function HS.get() {
+    local name="$(< "$3")"
+    mkpdir "$1"
+    case "$name" in
+	*.hsc) hsc2hs -o "$1" <(tar -xzOf "$2" "$name");;
+	*.hs)  tar -xzOf "$2" "$name" > "$1";;
+    esac
+}
+function HS.pkgMods() {
+    local pkg
+    mkpdir "$1"
+    for pkg in $(< "$2"); do
+	printf "%s\n" $(ghc-pkg field "$pkg" exposed-modules)
+    done | sort -u > "$1"
+}
+function HS.compile() {
+    mkpdir "$1" "$2"
+    ghc -optP --include="$4" -o "$1" -ohi "$2" -i"$SETUP_ROOT$OBJ" -c ${5:+$(< "$5")} "$3"
+}
+function HS.ld() {
+    mkpdir "$1"
+    ghc -o "$1" "${@:2}"
+}
+function HS.fullPkgs() {
+    local pkg vers
+    mkpdir "$1"
+    for pkg in $(< "$2"); do
+	vers="$(ghc-pkg field "$pkg" version)"
+	vers="${vers#version: }"
+	printf "%s\n" "$pkg-$vers"
+    done > "$1"
+}
+function HS.macros.genPkg() {
+    local pName vers a b c; local -a vns
+    pName="${1%-*}"
+    pName="${pName//-/_}"
+    vers="${1##*-}"
+    vns=( ${vers//./ } 0 0 )
+    a="${vns[0]}" ; b="${vns[1]}" ; c="${vns[2]}"
+    cat <<EOF
+#define VERSION_$pName "$vers"
+#undef MIN_VERSION_$pName
+#define MIN_VERSION_$pName(maj1,maj2,min) ( maj1 < $a || (maj1) == $a && (maj2) < $b || (maj1) == $a && (maj2) == $b && (min) <= $c )
+EOF
+}
+function HS.macros() {
+    local -a packages=( $(< "$2") ) core_packages=( $(< "$3") )
+    mkpdir "$1"
+    {
+	cat <<EOF
+#ifndef __GLASGOW_HASKELL__
+#define __GLASGOW_HASKELL__ $GHC_VNUM
+#endif
+#define HASH_TOK #
+#define CALLCONV ccall
+#define USE_DLSYM 1
+#define IS_WINDOWS False
+#define DATA_DIR "$INSTALL/share/world"
+#define EXE_EXTENSION ""
+#define _FILE_OFFSET_BITS 64
+EOF
+	for p in "${packages[@]}"; do HS.macros.genPkg "$p"; done
+	echo "#if __GLASGOW_HASKELL__ < 800 || defined(WORLD_IMPORTS)"
+	for p in "${core_packages[@]}"; do HS.macros.genPkg "$p"; done
+	echo "#endif"
+    } > "$1"
+}
+function HS.includes() {
+    mkpdir "$1"
+    sed -rn 's,^\s*#\s*include\s*"(.*)"\s*$,\1,p' "$2" > "$1"
+}
+
+function HS.auto_files() {
+    [[ "$1" =~ ^("$PKG"|"$DEP"|"$CONF"|"$POOL"|"$OBJ"|"$BIN")/(.*) ]] && {
+	local root="${BASH_REMATCH[1]}" path="${BASH_REMATCH[2]}"
+	case "$root" in
+	    "$CONF")
+		case "$path" in
+		    manifest.files)	prepare "$1" = Foreach -'$PKG/$word/conf.manifest' "$ETC/packages";;
+		    manifest)		prepare "$1" = Sorted @"$CONF/manifest.files";;
+		    c-manifest.files)	prepare "$1" = Foreach -'$PKG/$word/conf.c-manifest' "$ETC/packages";;
+		    c-manifest)         prepare "$1" = Sorted @"$CONF/c-manifest.files";;
+		    base-packages.full) prepare "$1" = HS.fullPkgs "$ETC/base-packages";;
+		    base-modules)       prepare "$1" = HS.pkgMods "$ETC/base-packages";;
+		    macros.h)           prepare "$1" = HS.macros "$ETC/packages" "$CONF/base-packages.full";;
+		esac;;
+	    "$PKG")
+		[[ "$path" =~ ([^/]*)/(package\.(tar\.gz|cabal(\.ar-path)?)|exposed-modules|conf.(c-)?manifest|(all-|other-|)extensions|(ext-|ghc-|)options|c-sources|includes) ]] && {
+		    local pkg="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"
+		    case "$file" in
+			package.tar.gz)		prepare "$1" = Hackage.get -"$pkg";;
+			package.cabal.ar-path)  prepare "$1" = Tar.find -'\.cabal$' "$PKG/$pkg/package.tar.gz";;
+			package.cabal)		prepare "$1" = Tar.get "$PKG/$pkg/package.tar.gz" "$PKG/$pkg/package.cabal.ar-path";;
+			exposed-modules)        prepare "$1" = Cabal.section -exposed-modules "$PKG/$pkg/package.cabal" -',';;
+			extensions)             prepare "$1" = Cabal.section -extensions "$PKG/$pkg/package.cabal" -,;;
+			other-extensions)       prepare "$1" = Cabal.section -other-extensions "$PKG/$pkg/package.cabal" -,;;
+			c-sources)              prepare "$1" = Cabal.section -c-sources "$PKG/$pkg/package.cabal" -,;;
+			includes)               prepare "$1" = Cabal.section -includes "$PKG/$pkg/package.cabal" -,;;
+			all-extensions)         prepare "$1" = Concat "$PKG/$pkg/"{other-,}extensions;;
+			ghc-options)            prepare "$1" = Cabal.section -ghc-options "$PKG/$pkg/package.cabal";;
+			ext-options)            prepare "$1" = Foreach -'-X$word' "$PKG/$pkg/all-extensions";;
+			options)                prepare "$1" = Concat "$PKG/$pkg/"{ext,ghc}-options;;
+			conf.manifest)          prepare "$1" = Foreach -'$word:'"$pkg" "$PKG/$pkg/exposed-modules";;
+			conf.c-manifest)        prepare "$1" = Foreach -'$word:'"$pkg" "$PKG/$pkg/c-sources" "$PKG/$pkg/includes";;
+		    esac
+		};;
+	    "$DEP"|"$POOL"|"$OBJ")
+		[[ "$path" =~ (.*)\.((c-)?pkg-name|(c-)?pkg\.file|hs(\.ar-path|pp|)|depends|(c-)?o(\.(c-)?files)?|full-o\.files|hi|options\.file|full-deps(\.files)?|pkg-deps(\.files|\.local)?|[ch](-sources(\.files)?|\.ar-path|)|incs|full-incs(\.files)?|bin-(hs|c)-o\.files) ]] && {
+		    local mod="${BASH_REMATCH[1]}" ext="${BASH_REMATCH[2]}"
+		    case "$root:$ext"	in
+			"$DEP":pkg-name)
+			    if HS.isLocalMod "$mod"; then
+				prepare "$1" = Echo -"${HS_MOD_PATH//\//-}"
+			    else
+				prepare "$1" = Lookup -"${mod//\//.}" "$CONF/manifest"
+			    fi;;
+			"$DEP":c-pkg-name)      prepare "$1" = Lookup -"$mod" "$CONF/c-manifest";;
+			"$DEP":pkg.file)	prepare "$1" = Foreach -'$PKG/$word/package.tar.gz' "$DEP/$mod.pkg-name";;
+			"$DEP":c-pkg.file)	prepare "$1" = Foreach -'$PKG/$word/package.tar.gz' "$DEP/$mod.c-pkg-name";;
+			"$DEP":c.ar-path)       prepare "$1" = Tar.find -"$mod\\.c\$" @"$DEP/$mod.c-pkg.file";;
+			"$DEP":h.ar-path)       prepare "$1" = Tar.find -"$mod\\.h\$" @"$DEP/$mod.c-pkg.file";;
+			"$POOL":c)              prepare "$1" = Tar.get @"$DEP/$mod.c-pkg.file" "$DEP/$mod.c.ar-path";;
+			"$POOL":h)              prepare "$1" = Tar.get @"$DEP/$mod.c-pkg.file" "$DEP/$mod.h.ar-path";;
+			"$DEP":hs.ar-path)	prepare "$1" = Tar.find -"$mod\\.hsc\\?\$" @"$DEP/$mod.pkg.file";;
+			"$POOL":hs)
+			    if HS.isLocalMod "$mod"; then
+				prepare "$1" = Copy "$SRC/$HS_MOD_PATH/source/$mod.hs"
+ 			    else
+				prepare "$1" = HS.get @"$DEP/$mod.pkg.file" "$DEP/$mod.hs.ar-path"
+			    fi;;
+			"$POOL":hspp)		prepare "$1" = HS.pp "$POOL/$mod.hs" "$CONF/macros.h";;
+			"$DEP":depends)         prepare "$1" = HS.depends "$POOL/$mod.hspp" "$CONF/base-modules";;
+			"$DEP":pkg-deps.files)  prepare "$1" = Foreach -'$DEP/${word//.//}.pkg-deps' "$DEP/$mod.depends";;
+			"$DEP":pkg-deps)        prepare "$1" = Sorted "$DEP/$mod.pkg-name" @"$DEP/$mod.pkg-deps.files";;
+			"$DEP":pkg-deps.local)  prepare "$1" = Filter "$DEP/$mod.pkg-deps" "$ETC/local-packages" -v;;
+			"$DEP":full-deps.files) prepare "$1" = Foreach -'$DEP/${word//.//}.full-deps' "$DEP/$mod.depends";;
+			"$DEP":full-deps)       prepare "$1" = Sorted "$DEP/$mod.depends" @"$DEP/$mod.full-deps.files";;
+			"$DEP":incs)            prepare "$1" = HS.includes "$POOL/$mod";;
+			"$DEP":full-incs.files) prepare "$1" = Foreach -'$DEP/$word.full-incs' "$DEP/$mod.incs";;
+			"$DEP":full-incs)       prepare "$1" = Sorted "$DEP/$mod.incs" @"$DEP/$mod.full-incs.files";;
+			"$DEP":c-sources.files) prepare "$1" = Foreach -'$PKG/$word/c-sources' "$DEP/$mod.pkg-deps.local";;
+			"$DEP":c-sources)  	prepare "$1" = Sorted @"$DEP/$mod.c-sources.files";;
+			"$DEP":o.c-files)       prepare "$1" = Foreach -'$OBJ/${word#$POOL/}-o' "$DEP/$mod.c-sources";;
+			"$DEP":o.files)         prepare "$1" = Foreach -'$OBJ/${word//.//}.o' "$DEP/$mod.depends";;
+
+			"$DEP":options.file)
+			    if HS.isLocalMod "$mod"; then
+				prepare "$1" = Echo -"$SRC/$HS_MOD_PATH/options"
+			    else
+				prepare "$1" = Foreach -'$PKG/$word/options' "$DEP/$mod.pkg-name"
+			    fi;;
+			"$DEP":c-o.files)       prepare "$1" = Foreach -'$POOL/$word' "$DEP/$mod.c.full-incs";;
+			"$OBJ":c-o)             prepare "$1" = HS.cc "$POOL/$mod.c" @"$DEP/$mod.c-o.files";;
+			"$OBJ":o)               prepare "$1" "${1/.o/.hi}" = HS.compile "$POOL/$mod.hs" "$CONF/macros.h" @"$DEP/$mod.options.file" @"$DEP/$mod.o.files" @"$DEP/$mod.o.c-files";;
+
+			"$DEP":bin-hs-o.files)  prepare "$1" = Foreach -'$OBJ/${word//.//}.o' "$DEP/$mod.full-deps";;
+			"$DEP":bin-c-o.files)   prepare "$1" = Foreach -'$(word="${word#$POOL/}"; echo "$OBJ/$word-o")' "$DEP/$mod.c-sources";;
+			*) return 1;;
+		    esac
+		};;
+	    "$BIN") prepare "$1" = HS.ld "$OBJ/${path//.//}.o" @"$DEP/${path//.//}.bin-"{c,hs}"-o.files";;
+	esac
+    }    
+}
+Setup.addHooks HS.auto_files

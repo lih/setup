@@ -1,0 +1,32 @@
+#!/bin/bash
+if [ $# -gt 0 ] && [[ "${1##*/}" == [sS]etup* ]]; then
+    script="$(realpath "$1" || echo "$1")"
+    
+    program="${script##*/}"
+    cd "${script%/*}"
+    shift
+else
+    until [ "$PWD" == / ] || [ -e Setup ]; do cd ..; done
+    if [ -e Setup ]; then
+        program=Setup
+    else
+        echo "Error: No Setup file found in the current directory or its parents." >&2
+        exit 1
+    fi
+fi
+: ${SETUP_INSTALL_DIR:=/usr}
+source "$SETUP_INSTALL_DIR/lib/setup.shl"
+Setup.import base
+source "$program" "$@"
+setup
+red=$'\033[31m'
+yellow=$'\033[33m'
+def=$'\033[m'
+for err in "${SETUP_FAILED[@]}"; do
+    printf "${red}Error[%s]: %s %s${def}\n" "${SETUP_STATE[$err.errno]}" "${SETUP_STATE[$err.cmd]}" "$err"
+    IFS=$'\n'
+    printf "${red}|${yellow} %s${def}\n" $(< "$SETUP_TMPDIR/log/$err.log")
+    IFS="$IFSBAK"
+done >&2
+if (( ${#SETUP_FAILED[@]} == 0 )); then :; else exit 1; fi
+
