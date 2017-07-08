@@ -7,16 +7,24 @@ source files, while minimizing the amount of work needed to rebuild
 after a small change.
 
 Setup tries to offer the same basic set of features, in a Bash
-environment.
+environment. It supports parallel compilation, and transitive
+dependencies. Other than that, it tries to be as easy to learn as
+possible.
 
 Install and first use
 ---------------
 
 Since it's basically just a Bash script, you can start using Setup
-from your shell by simply sourcing the `lib/setup.shl` file.
+from your shell by simply sourcing the `lib/setup.shl` file (if you
+are using Bash, that is).
 
 This file defines two functions, `prepare` and `setup`, whose job it
 is to respectively prepare computations and run them.
+
+There is also a `bin/setup` executable that performs a job similar to
+the `make` tool : it searches a file named `Setup` in the current
+directory or its parents, and runs that file in an environment where
+the setup library was already sourced.
 
 ### The `prepare` function
 
