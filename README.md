@@ -37,7 +37,7 @@ result of the application of the COMMAND to its arguments. It does
 An argument can take three shapes :
 
   - starting with a `-` indicates a *flag argument*, which doesn't need to describe a file
-  - starting with a `@` indicates a *splice dependency*, which is described in more detail [here|#why_not_use_make]
+  - starting with a `@` indicates a *splice dependency*, which is described in more detail [here](#why-not-use-make)
   - otherwise, it is a simple dependency
 
 ### The `setup` function
