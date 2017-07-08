@@ -75,24 +75,24 @@ the following example :
 
 file: test.c
 
-:       #include "test.h"
-    
-        int main() { printf("%d\n",f()); }
+    #include "test.h"
+
+    int main() { printf("%d\n",f()); }
 
 file: test.h
 
-:       #include "A.h"
+    #include "A.h"
 
-        A_type f(void);
+    A_type f(void);
 
 file: A.h
 
-:       typedef int A_type;
+    typedef int A_type;
 
 file: Makefile
 
-:       test.o: test.c ???
-        	gcc -c $< -o $@
+    test.o: test.c ???
+    	gcc -c $< -o $@
 
 In this example, Make offers no simple way for `test.o` to know that
 it depends on `A.h`, or even `test.h` if `test.c` doesn't exist a
