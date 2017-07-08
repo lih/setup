@@ -137,3 +137,14 @@ function Pkg.auto_files() {
     }
 }
 Setup.addHooks Pkg.auto_files
+
+function Pkg.man() {
+    pandoc -f markdown -t man -s "$2" -o "$1"
+}
+function Pkg.man-pages() {
+    local page
+    for page; do
+	prepare "$page" = Pkg.man "$page.md"
+	prepare "root/usr/share/man/man${page: -1}/$page.gz" = GZip "$page"
+    done
+}
