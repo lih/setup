@@ -11,20 +11,20 @@ environment. It supports parallel compilation, and transitive
 dependencies. Other than that, it tries to be as easy to learn as
 possible.
 
-Install and first use
----------------
+Installing and using Setup
+--------------------------
 
 Since it's basically just a Bash script, you can start using Setup
-from your shell by simply sourcing the [lib/setup.shl](lib/setup.shl) file (if you
-are using Bash, that is).
+from your shell by simply sourcing the [lib/setup.shl](lib/setup.shl)
+file (if you are using Bash, that is).
 
 This file defines two functions, `prepare` and `setup`, whose job it
 is to respectively prepare computations and run them.
 
-There is also a `bin/setup` executable that performs a job similar to
-the `make` tool : it searches a file named `Setup` in the current
-directory or its parents, and runs that file in an environment where
-the setup library was already sourced.
+There is also a [bin/setup](bin/setup) executable that performs a job
+similar to the `make` tool : it searches a file named `Setup` in the
+current directory or its parents, and runs that file in an environment
+where the setup library was already sourced.
 
 ### The `prepare` function
 
@@ -49,7 +49,8 @@ it, in addition to the FILEs passed as  arguments.
 
 ### Automatic targets
 
-Other build tools usually provide a sort of "wildcard target" to avoid repetition, as in :
+Other build tools usually provide a sort of "wildcard target" to avoid
+repetition, as in :
 
     %.o: %.c
     	 ...
@@ -71,8 +72,8 @@ It doesn't look as pretty, but it is a much more powerful way to
 describe automatic dependencies, as it allows the full power of Bash
 to be brought forth to take advantage of contextual information.
 
-For more example of automatic dependencies, visit the `lib/setup.d`
-directory.
+For more example of automatic dependencies, visit the
+[lib/setup.d](lib/setup.d) directory.
 
 Why not use Make ?
 ------------------
