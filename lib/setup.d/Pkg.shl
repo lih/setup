@@ -159,8 +159,8 @@ function Pkg.man-pages() {
     local page file
     for page in $1; do
 	file="usr/share/man/man${page: -1}/$page.gz"
-	prepare "$DOC_DIST/$page" = Doc.man "$page.md"
-	prepare "$PKG_DIST/$file" = GZip "$DOC_DIST/$page"
+	prepare "$DOC_BUILD/$page" = Doc.man "$page.md"
+	prepare "$PKG_DIST/$file" = GZip "$DOC_BUILD/$page"
 	PKG_FILES+=( "$file" )
     done
     "${@:2}"

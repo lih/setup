@@ -1,6 +1,6 @@
 #!/bin/bash
 : ${DOC_PREFIX="/$SETUP_PREFIX"}
-: ${DOC_DIST="${DOC_PREFIX}.dist"}
+: ${DOC_BUILD="${DOC_PREFIX}.build"}
 : ${DOC_SRC="${DOC_PREFIX}src"}
 
 function Doc.man() {
@@ -8,10 +8,11 @@ function Doc.man() {
     pandoc -f markdown -t man -s "$2" -o "$1"
 }
 function Doc.auto_files() {
-    [[ "$1" =~ ^("$DOC_DIST")/(.*) ]] && {
+    [[ "$1" =~ ^("$DOC_BUILD")/(.*) ]] && {
 	local root="${BASH_REMATCH[1]}" path="${BASH_REMATCH[2]}"
 	case "$path" in
 	    *.[0-9]) prepare "$1" = Doc.man "$DOC_SRC/$path.md";;
+	    *) return 1;;
 	esac
     }    
 }
