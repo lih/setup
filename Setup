@@ -7,5 +7,5 @@ case "$1" in
 	    prepare "$DIST/$file" = Copy "$file"
 	done
 	;;
-    package) prepare "$DIST/package.tar.gz" = Tar -"s,^$SETUP_PREFIX,usr/," $(find bin lib -type f);;
+    package) prepare ".dist.tar.gz" = Tar -"s,^$SETUP_PREFIX,usr/," $(find bin lib -type f);;
 esac

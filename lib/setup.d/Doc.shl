@@ -1,0 +1,18 @@
+#!/bin/bash
+: ${DOC_ROOT="/$SETUP_PREFIX"}
+: ${DOC_DIST="${DOC_ROOT}.dist"}
+: ${DOC_SRC="${DOC_ROOT}src"}
+
+function Doc.man() {
+    mkpdir "$1"
+    pandoc -f markdown -t man -s "$2" -o "$1"
+}
+function Doc.auto_files() {
+    [[ "$1" =~ ^("$DOC_DIST")/(.*) ]] && {
+	local root="${BASH_REMATCH[1]}" path="${BASH_REMATCH[2]}"
+	case "$path" in
+	    *.[0-9]) prepare "$1" = Doc.man "$DOC_SRC/$path.md";;
+	esac
+    }    
+}
+Setup.addHooks Doc.auto_files

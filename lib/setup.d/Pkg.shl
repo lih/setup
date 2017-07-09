@@ -112,16 +112,20 @@ function Pkg.pacman.TarXZ() {
 	    }
     )
 }
+function Pkg.incRev() {
+    local val="$(< "$1")" 2>/dev/null
+    echo "$((${val:-0}+1))" > "$1"
+}
 
 function Pkg.bundle.pacman() {
     prepare "$PKG_BUILD/pacman/$1/package.install" = Pkg.pacman.Installer "$PKG_SRC/$1/installer"
     prepare "$PKG_BUILD/pacman/$1/PKGBUILD" = \
 	    Pkg.pacman.PkgBuild "$PKG_ETC/aliases.pacman" -"$1" \
-	    "$PKG_SRC/$1/"{version,revision,maintainer-name,maintainer-email,description,architecture,dependencies,replaces,.dist/package.tar.gz} \
+	    "$PKG_SRC/$1/"{version,revision,maintainer-name,maintainer-email,description,architecture,dependencies,replaces,.dist.tar.gz} \
 	    "$PKG_BUILD/pacman/$1/package.install"
-    prepare "$2" = Pkg.pacman.TarXZ "$PKG_SRC/$1/.dist/package.tar.gz" "$PKG_BUILD/pacman/$1/PKGBUILD"
+    prepare "$2" = Pkg.pacman.TarXZ "$PKG_SRC/$1/.dist.tar.gz" "$PKG_BUILD/pacman/$1/PKGBUILD"
 }
-function Pkg.auto_files() {
+function Pkg.auto-files() {
     {
 	[[ "$1" =~ ^("$PKG_BUILD")/([^/]*)/([^/]*)/(.*) ]] && {
 	    local root="${BASH_REMATCH[1]}" pkgtype="${BASH_REMATCH[2]}" pkgname="${BASH_REMATCH[3]}" path="${BASH_REMATCH[4]}"
@@ -132,19 +136,36 @@ function Pkg.auto_files() {
 	}
     } || {
 	[[ "$1" =~ ^"$PKG_SRC"/([^/]*)/(version|revision|maintainer(-name|-email)|description|architecture|dependencies|replaces|installer) ]] && {
-	    prepare "$1" = Empty
+	    case "${BASH_REMATCH[2]}" in
+		revision) prepare "$1" = Pkg.incRev "$PKG_SRC/${BASH_REMATCH[1]}/.dist.tar.gz";;
+		*)        prepare "$1" = Empty;;
+	    esac
 	}
-    }
+    } 
 }
-Setup.addHooks Pkg.auto_files
+Setup.addHooks Pkg.auto-files
 
-function Pkg.man() {
-    pandoc -f markdown -t man -s "$2" -o "$1"
+function Pkg.withManPages() {
+    local -a PKG_MAN_PAGES=( "${PKG_MAN_PAGES[@]}" $1 )
+    "${@:2}"
 }
-function Pkg.man-pages() {
-    local page
-    for page; do
-	prepare "$page" = Pkg.man "$page.md"
-	prepare "root/usr/share/man/man${page: -1}/$page.gz" = GZip "$page"
+function Pkg.setFiles() {
+    local -a files=(  )
+    local file src dst
+    for file; do
+	case "$file" in
+	    *=*) src="${file#*=}"; dst="${file%%=*}";;
+	    *)   src="$file"; dst="$file";;
+	esac
+	files+=( "$dst" )
+	prepare ".dist/$dst" = Copy "$src"
     done
+    local page
+    for page in "${PKG_MAN_PAGES[@]}"; do
+	file="usr/share/man/man${page: -1}/$page.gz"
+	prepare "$DOC_DIST/$page" = Doc.man "$page.md"
+	prepare ".dist/$file" = GZip "$DOC_DIST/$page"
+	files+=( "$file" )
+    done
+    prepare .dist.tar.gz = Tar -"s,${SETUP_PREFIX}.dist,," "${files[@]/#/.dist/}"
 }
