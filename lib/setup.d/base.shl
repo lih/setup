@@ -27,3 +27,10 @@ function Tar() {
     tar -czf "$dst" --transform="$re" "$@"
 }
 function GZip() { mkpdir "$1"; gzip < "$2" > "$1"; }
+
+function Git.autocommit() {
+    ( cd "$(dirname "$1")" \
+	  && git add -A \
+	  && git commit -m "Automatic commit on $(date)" ) \
+	&& touch "$1"
+}

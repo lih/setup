@@ -1,7 +1,7 @@
 #!/bin/bash
-: ${DOC_ROOT="/$SETUP_PREFIX"}
-: ${DOC_DIST="${DOC_ROOT}.dist"}
-: ${DOC_SRC="${DOC_ROOT}src"}
+: ${DOC_PREFIX="/$SETUP_PREFIX"}
+: ${DOC_DIST="${DOC_PREFIX}.dist"}
+: ${DOC_SRC="${DOC_PREFIX}src"}
 
 function Doc.man() {
     mkpdir "$1"

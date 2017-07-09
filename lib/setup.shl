@@ -2,9 +2,9 @@
 declare -ga SETUP_AUTO_DEPEND_HOOKS=( )
 declare -g JOBS=8
 
+declare -gA SETUP_STATE
 declare -gA SETUP_MODULES=( )
 declare -ga SETUP_FAILED
-declare -gA SETUP_STATE
 SETUP_ROOT="$PWD"
 SETUP_PREFIX=''
 SETUP_TMPDIR="$(mktemp -d)"
@@ -123,7 +123,7 @@ function Setup.primeCan() {
     Setup.setVal "$can.status" 1:primed
     Setup.setArr "$can.args" "${fullargs[@]}"
     if ((argc == 0)); then
-        LEAVES+=( "$can" )
+        SETUP_LEAVES+=( "$can" )
     fi
 }
 function Setup.isUpToDate() {
@@ -136,7 +136,7 @@ function Setup.isUpToDate() {
 function Setup.runLeaves() {
     local leaf
     local -a args dst
-    for leaf in "${LEAVES[@]}"; do
+    for leaf in "${SETUP_LEAVES[@]}"; do
         Setup.getArr args "$leaf.args"
         Setup.getArr dst "$leaf.targets"
         if Setup.isUpToDate "$dst" "${args[@]}"; then
@@ -149,7 +149,7 @@ function Setup.runLeaves() {
             Setup.send $SETUP_WORKER "$leaf ${cmd[*]}" '%-20s %s\n' "${SETUP_STATE[$leaf.cmd]}" "${dst[*]}"
         fi
     done
-    LEAVES=( )
+    SETUP_LEAVES=( )
 }
 function Setup.atexit() { rm -rf "$SETUP_TMPDIR"; }
 
@@ -223,7 +223,7 @@ function setup() {
 		mkdir -p "$(dirname "$logfile")"
                 eval "${msg#* }" >"$logfile" 2>&1
                 Setup.trace Setup.send $SETUP_MASTER "$key $?"
-            done
+	    done
         ) & workers+=( "$!" )
     done
 
@@ -232,7 +232,7 @@ function setup() {
     local arg
     for arg in "${args[@]}"; do Setup.runDependHooks "$arg" || return; done
     
-    local nl="${#LEAVES[@]}" can stat ret=0
+    local nl="${#SETUP_LEAVES[@]}" can stat ret=0
     Setup.runLeaves
     while ((nl>0)) && Setup.receive $SETUP_MASTER msg; do
         Setup.log INFO "[MASTER] received $msg"
@@ -258,11 +258,11 @@ function setup() {
 		    argc="${SETUP_STATE[$x.argc]}"
 		    SETUP_STATE[$x.argc]=$((argc-1))
 		    if ((argc == 1)); then
-                        LEAVES+=( "$x" )
+                        SETUP_LEAVES+=( "$x" )
 		    fi
                 done
 
-                ((nl+=${#LEAVES[@]}))
+                ((nl+=${#SETUP_LEAVES[@]}))
                 Setup.runLeaves
                 ;;
 	    *)
