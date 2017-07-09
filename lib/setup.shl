@@ -298,9 +298,10 @@ function Setup.load() {
     local path="${1%/*}" file="${1##*/}"
     shift
     local SETUP_PREFIX="$SETUP_PREFIX$path/"
-    pushd "$path" >/dev/null
-    source "$file"
-    popd >/dev/null
+    pushd "$path" >/dev/null && {
+	source "$file"
+	popd >/dev/null
+    }
 }
 
 trap Setup.atexit EXIT
