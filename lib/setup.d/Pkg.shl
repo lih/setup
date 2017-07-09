@@ -151,7 +151,7 @@ function Pkg.package() {
     local -a PKG_FILES=( )
     "$@"
     prepare "$PKG_DIST.tar.gz" = Tar -"s,${SETUP_PREFIX}$PKG_DIST/,," "${PKG_FILES[@]/#/$PKG_DIST/}"
-    if [ "$SETUP_GIT_AUTOCOMMIT" == 1 ]; then
+    if [ "$PKG_AUTOCOMMIT" == 1 ]; then
 	prepare .autocommit = Git.autocommit "$PKG_DIST.tar.gz"
     fi
 }
