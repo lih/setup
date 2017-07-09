@@ -145,27 +145,43 @@ function Pkg.auto-files() {
 }
 Setup.addHooks Pkg.auto-files
 
-function Pkg.withManPages() {
-    local -a PKG_MAN_PAGES=( "${PKG_MAN_PAGES[@]}" $1 )
+function Pkg.package() {
+    local -a PKG_FILES=( )
+    "$@"
+    prepare .dist.tar.gz = Tar -"s,${SETUP_PREFIX}.dist/,," "${PKG_FILES[@]/#/.dist/}"
+}
+function Pkg.man-pages() {
+    local page file
+    for page in $1; do
+	file="usr/share/man/man${page: -1}/$page.gz"
+	prepare "$DOC_DIST/$page" = Doc.man "$page.md"
+	prepare ".dist/$file" = GZip "$DOC_DIST/$page"
+	PKG_FILES+=( "$file" )
+    done
     "${@:2}"
 }
-function Pkg.setFiles() {
+function Pkg.po-files() {
+    local dir="$1" po locale file
+    local -a pos=( $2 )
+    for po in "${pos[@]}"; do
+	locale="${po%%/*}" path="${po#*/}"
+	file="usr/share/locale/$locale/LC_MESSAGES/${path/%.po/.mo}"
+	prepare ".dist/$file" = Pkg.PO2MO "$dir/$po"
+	PKG_FILES+=( "$file" )
+    done
+    "${@:3}"
+}
+function Pkg.files() {
     local -a files=(  )
     local file src dst
     for file; do
 	case "$file" in
 	    *=*) src="${file#*=}"; dst="${file%%=*}";;
-	    *)   src="$file"; dst="$file";;
+	    *)   src="$file";      dst="$file";;
 	esac
-	files+=( "$dst" )
 	prepare ".dist/$dst" = Copy "$src"
+	PKG_FILES+=( "$dst" )
     done
-    local page
-    for page in "${PKG_MAN_PAGES[@]}"; do
-	file="usr/share/man/man${page: -1}/$page.gz"
-	prepare "$DOC_DIST/$page" = Doc.man "$page.md"
-	prepare ".dist/$file" = GZip "$DOC_DIST/$page"
-	files+=( "$file" )
-    done
-    prepare .dist.tar.gz = Tar -"s,${SETUP_PREFIX}.dist,," "${files[@]/#/.dist/}"
 }
+
+function Pkg.PO2MO() { mkpdir "$1" ; msgfmt "$2" -o "$1" ; }

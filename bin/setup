@@ -16,7 +16,7 @@ else
 fi
 : ${SETUP_INSTALL_DIR:=/usr}
 source "$SETUP_INSTALL_DIR/lib/setup.shl"
-Setup.import base
+Setup.use base
 source "$program" "$@"
 setup
 red=$'\033[31m'

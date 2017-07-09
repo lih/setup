@@ -285,7 +285,7 @@ function setup() {
 }
 
 function Setup.addHooks() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
-function Setup.import() {
+function Setup.use() {
     local mod
     for mod; do
 	if [ "${SETUP_MODULES[$mod]:+x}" == '' ]; then
