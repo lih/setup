@@ -3,7 +3,7 @@
 : ${PKG_BUILD="${PKG_PREFIX}.build"}
 : ${PKG_SRC="${PKG_PREFIX}src"}
 : ${PKG_ETC="${PKG_PREFIX}etc"}
-: ${PKG_DIST=.dist}
+: ${PKG_DIST=.pkg}
 
 function Pkg.incRev() {
     local val="$(< "$1")" 2>/dev/null
