@@ -1,9 +1,15 @@
 #!/usr/bin/setup
-# -*- mode: shell-script -*-
 Setup.use Pkg
-declare DIST=.dist
 case "$1" in
     ''|package)
-	Pkg.package Pkg.files $(for file in $(find bin lib -type f); do echo "usr/$file=$file"; done)
+	Pkg.package Pkg.files \
+		    usr/share/doc/setup/README.md=README.md
+		    $(for file in $(find bin lib -type f); do echo "usr/$file=$file"; done)
 	;;
 esac
+
+# Local Variables:
+# mode: shell-script
+# sh-shell: bash
+# End:
+
