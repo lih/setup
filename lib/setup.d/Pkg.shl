@@ -5,6 +5,11 @@
 : ${PKG_ETC="${PKG_PREFIX}etc"}
 : ${PKG_DIST=.dist}
 
+function Pkg.incRev() {
+    local val="$(< "$1")" 2>/dev/null
+    echo "$((${val:-0}+1))" > "$1"
+}
+
 function Pkg.pacman.Installer() {
     mkpdir "$1"
     local file="$(< "$2")"
@@ -113,11 +118,6 @@ function Pkg.pacman.TarXZ() {
 	    }
     )
 }
-function Pkg.incRev() {
-    local val="$(< "$1")" 2>/dev/null
-    echo "$((${val:-0}+1))" > "$1"
-}
-
 function Pkg.bundle.pacman() {
     prepare "$PKG_BUILD/pacman/$1/package.install" = Pkg.pacman.Installer "$PKG_SRC/$1/etc/installer"
     prepare "$PKG_BUILD/pacman/$1/PKGBUILD" = \
@@ -126,6 +126,113 @@ function Pkg.bundle.pacman() {
 	    "$PKG_SRC/$1/$PKG_DIST.tar.gz" \
 	    "$PKG_BUILD/pacman/$1/package.install"
     prepare "$2" = Pkg.pacman.TarXZ "$PKG_SRC/$1/$PKG_DIST.tar.gz" "$PKG_BUILD/pacman/$1/PKGBUILD"
+}
+
+function Pkg.deb.Control() {
+    local dest="$1"			; shift
+    local -a aliases=( $(< "$1") )	; shift
+    local name="${1#-}"
+    shift
+    local version="$(< "$1")"           ; shift
+    local rev="$(< "$1")"		; shift
+    local email="$(< "$1")"		; shift
+    local maintainer="$(< "$1")"	; shift
+    local depends_file="$1"		; shift
+    local replaces_file="$1"            ; shift
+    local arch="$(< "$1")"		; shift
+    local description="$(< "$1")"	; shift
+
+    declare -A lookup
+    for a in "${aliases[@]}"; do
+	lookup[${a%%@*}]="${a#*@}"
+    done
+
+    local dep minbound maxbound depends= replaces=
+    for dep in $(< "$depends_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+	depends+="${depends:+,}${lookup[$d]:-$d${minbound:+ (>= $minbound)}}"
+    done
+    for dep in $(< "$replaces_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+	replaces+="${replaces:+,}${lookup[$d]:-$d${minbound:+ (>= $minbound)}}"
+    done
+
+    declare -A archs
+    archs=(
+	['x64']=amd64 ['x86_64']=amd64 ['amd64']=amd64
+	['x86']=i386  ['i386']=i386
+	['all']=all   ['any']=all
+    )
+
+    cat > "$dest" <<EOF
+Package: $name
+Version: $version-$rev
+Architecture: ${archs[$arch]}
+Maintainer: $maintainer <$email>
+${depends:+Depends: $depends"
+"}${replaces:+Replaces: $replaces"
+"}Description: $description
+EOF
+}
+function Pkg.deb.Installer() {
+    local postinst="$1"		; shift
+    local prerm="$1"		; shift
+
+    local src="$(< "$1")"	; shift
+    local vers="$(< "$1")"	; shift
+    local rev="$(< "$1")"	; shift
+
+    mkpdir "$postinst" "$prerm"
+
+    if [ "$src" ]; then
+	cat > "$postinst" <<EOF
+#!/bin/bash
+case "\$1" in
+  configure)
+    if [ "\${2:+x}" == x ]; then
+      "$src" post-upgrade "$vers-$rev"
+    else
+      "$src" install "$vers-$rev"
+    fi
+    ;;
+esac
+EOF
+	cat > "$prerm" <<EOF
+#!/bin/bash
+case "\$1" in
+  remove)
+    "$src" uninstall "$vers-$rev"
+    ;;
+  upgrade)
+    "$src" pre-upgrade "$vers-$rev"
+    ;;
+esac
+EOF
+    else
+	echo "#!/bin/bash" > "$postinst"
+	echo "#!/bin/bash" > "$prerm"
+    fi
+    chmod +x "$postinst" "$prerm"
+}
+function Pkg.deb.DpkgBuild() {
+    local dest="$1"; shift
+    local ar="$1"; shift
+    local root="${1%/DEBIAN/*}"
+    tar -xzf "$ar" -C "$root"
+    fakeroot dpkg-deb -Zgzip -b "$root" "$dest"
+}
+function Pkg.bundle.deb() {
+    prepare "$PKG_BUILD/deb/$1/root/DEBIAN/control" = Pkg.deb.Control \
+	    "$PKG_ETC/aliases.deb" -"$1" \
+	    "$PKG_SRC/$1/etc/"{version,revision,maintainer-{email,name},dependencies,replaces,architecture,description}
+    prepare "$PKG_BUILD/deb/$1/root/DEBIAN/"{postinst,prerm} = Pkg.deb.Installer "$PKG_SRC/$1/etc/"{installer,version,revision}
+    prepare "$PKG_BUILD/deb/$1/package.bundle" = \
+	    Pkg.deb.DpkgBuild "$PKG_SRC/$1/$PKG_DIST.tar.gz" "$PKG_BUILD/deb/$1/root/DEBIAN/"{control,postinst,prerm} \
+	    
 }
 function Pkg.auto-files() {
     {
