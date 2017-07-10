@@ -15,8 +15,9 @@ Installing and using Setup.shl
 --------------------------
 
 Since it's basically just a Bash script, you can start using Setup.shl
-from your shell by simply sourcing the [lib/setup.shl](lib/setup.shl)
-file (if you are using Bash, that is).
+from your shell by simply setting the `SETUP_INSTALL_DIR` variable to
+the root of this project, and sourcing the
+[lib/setup.shl](lib/setup.shl) file (if you are using Bash, that is).
 
 This file defines two functions, `prepare` and `setup`, whose job it
 is to respectively prepare computations and run them.
@@ -25,6 +26,14 @@ There is also a [bin/setup](bin/setup) executable that performs a job
 similar to the `make` tool : it searches a file named `Setup` in the
 current directory or its parents, and runs that file in an environment
 where the setup library was already sourced.
+
+This project provides a Setup file to illustrate its own
+usage. Installing Setup.shl can be done by running
+[bin/setup](bin/setup) and installing the resulting archive (called
+`.dist.tar.gz`) to the root of your filesystem :
+
+    SETUP_INSTALL_DIR="$PWD" bin/setup package
+    sudo tar -xzf .dist.tar.gz -C /
 
 ### The `prepare` function
 
