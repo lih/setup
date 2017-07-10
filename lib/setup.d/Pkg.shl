@@ -168,6 +168,7 @@ function Pkg.deb.Control() {
 	['all']=all   ['any']=all
     )
 
+    mkpdir "$dest"
     cat > "$dest" <<EOF
 Package: $name
 Version: $version-$rev
