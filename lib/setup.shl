@@ -91,11 +91,12 @@ function Setup.runDependHooks() {
 }
 function Setup.primeCan() {
     local argc=0 arg can="$1"
-    local -a args=( ) newargs fullargs=( )
+    local -a args=( ) newargs fullargs=( ) hiddenargs=( )
     Setup.getArr args "$can.args"
     for arg in "${args[@]}"; do
         case "$arg" in
             @*)
+		hiddenargs+=( "${arg#@}" )
 		newargs=( $(< "${arg#@}") )
 		Setup.addPrefix newargs
 		fullargs+=( "${newargs[@]}" );;
@@ -122,6 +123,7 @@ function Setup.primeCan() {
     Setup.setVal "$can.argc" "$argc"
     Setup.setVal "$can.status" 1:primed
     Setup.setArr "$can.args" "${fullargs[@]}"
+    Setup.setArr "$can.hidden-args" "${hiddenargs[@]}"
     if ((argc == 0)); then
         SETUP_LEAVES+=( "$can" )
     fi
@@ -135,11 +137,12 @@ function Setup.isUpToDate() {
 }
 function Setup.runLeaves() {
     local leaf
-    local -a args dst
+    local -a args hargs dst
     for leaf in "${SETUP_LEAVES[@]}"; do
         Setup.getArr args "$leaf.args"
+	Setup.getArr hargs "$leaf.hidden-args"
         Setup.getArr dst "$leaf.targets"
-        if Setup.isUpToDate "$dst" "${args[@]}"; then
+        if Setup.isUpToDate "$dst" "${args[@]}" "${hargs[@]}"; then
             Setup.send $SETUP_MASTER "$leaf 0"
         else
             local -a cmd=( "${SETUP_STATE[$leaf.cmd]}" "${dst[@]}" "${args[@]}" )
