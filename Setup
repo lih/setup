@@ -3,7 +3,7 @@ Setup.use Pkg
 case "$1" in
     ''|package)
 	Pkg.package Pkg.files \
-		    usr/share/doc/setup/README.md=README.md
+		    usr/share/doc/setup/README.md=README.md \
 		    $(for file in $(find bin lib -type f); do echo "usr/$file=$file"; done)
 	;;
 esac
