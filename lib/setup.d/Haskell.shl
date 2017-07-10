@@ -152,7 +152,7 @@ function HS.auto_files() {
 		    local pkg="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"
 		    case "$file" in
 			package.tar.gz)		prepare "$1" = Hackage.get -"$pkg";;
-			package.cabal.ar-path)  prepare "$1" = Tar.find -'\.cabal$' "$HS_PKG/$pkg/package.tar.gz";;
+			package.cabal.ar-path)  prepare "$1" = Tar.find -"${pkg%-*}"'\.cabal$' "$HS_PKG/$pkg/package.tar.gz";;
 			package.cabal)		prepare "$1" = Tar.get "$HS_PKG/$pkg/package.tar.gz" "$HS_PKG/$pkg/package.cabal.ar-path";;
 			exposed-modules)        prepare "$1" = Cabal.section -exposed-modules "$HS_PKG/$pkg/package.cabal" -',';;
 			extensions)             prepare "$1" = Cabal.section -extensions "$HS_PKG/$pkg/package.cabal" -,;;
