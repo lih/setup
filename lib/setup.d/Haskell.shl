@@ -34,13 +34,70 @@ function Tar.get() {
 function Cabal.section() {
     local field="${2#-}"
     mkpdir "$1"
-    local text="$(sed -rn '/^\s*--/d;/^library/I,/^\S/{/^\S/!{/^\s+'"$field"':/I,/:|\bif\b/{s/'"$field"'://i;/:|\bif\b|^\s*--/!p}}}' "$3")"
+    local text="$(sed -rn '
+/^library/I,/^\S/{
+  /^\s+'"$field"':/I{
+    :loop;{
+      /^\s*--/{n;bloop}
+      /'"$field"':/bnext-line
+      /^\S|:|\bif\b/bendloop
+      :next-line
+      s/'"$field"'://i;p;n
+      bloop
+    }
+    :endloop	
+  }
+}
+' "$3")" || return
     if [ -n "$4" ]; then
 	local IFS="$IFS${4#-}"
     fi
     printf "%s\n" $text > "$1"
 }
 
+function HS.GHCAutoConf() {
+    cat > "$1.c" <<EOF
+#include <stdio.h>
+#include <stdint.h>
+
+int main() {
+    printf("#define SIZEOF_WORD32      %d\n",sizeof(uint32_t));
+    printf("#define ALIGNMENT_WORD32   %d\n",sizeof(uint32_t));
+
+    printf("#define SIZEOF_INT8_T     %d\n",sizeof(int8_t));
+    printf("#define ALIGNMENT_INT8_T  %d\n",sizeof(int8_t));
+    printf("#define SIZEOF_INT16_T    %d\n",sizeof(int16_t));
+    printf("#define ALIGNMENT_INT16_T %d\n",sizeof(int16_t));
+    printf("#define SIZEOF_INT32_T    %d\n",sizeof(int32_t));
+    printf("#define ALIGNMENT_INT32_T %d\n",sizeof(int32_t));
+    printf("#define SIZEOF_INT64_T    %d\n",sizeof(int64_t));
+    printf("#define ALIGNMENT_INT64_T %d\n",sizeof(int64_t));
+
+    printf("#define SIZEOF_UINT8_T     %d\n",sizeof(uint8_t));
+    printf("#define ALIGNMENT_UINT8_T  %d\n",sizeof(uint8_t));
+    printf("#define SIZEOF_UINT16_T    %d\n",sizeof(uint16_t));
+    printf("#define ALIGNMENT_UINT16_T %d\n",sizeof(uint16_t));
+    printf("#define SIZEOF_UINT32_T    %d\n",sizeof(uint32_t));
+    printf("#define ALIGNMENT_UINT32_T %d\n",sizeof(uint32_t));
+    printf("#define SIZEOF_UINT64_T    %d\n",sizeof(uint64_t));
+    printf("#define ALIGNMENT_UINT64_T %d\n",sizeof(uint64_t));
+
+    printf("#define SIZEOF_VOID_P      %d\n",sizeof(void*));
+    printf("#define ALIGNMENT_VOID_P   %d\n",sizeof(void*));
+
+    printf("#define SIZEOF_FLOAT       %d\n",sizeof(float));
+    printf("#define ALIGNMENT_FLOAT    %d\n",sizeof(float));
+    printf("#define SIZEOF_DOUBLE      %d\n",sizeof(double));
+    printf("#define ALIGNMENT_DOUBLE   %d\n",sizeof(double));
+
+    return 0;
+}
+EOF
+    gcc "$1.c" -o "$1.x"
+    rm -f "$1.c"
+    "$1.x" > "$1"
+    rm -f "$1.x"
+}
 function HS.isLocalMod() {
     local modpath=( "$SETUP_ROOT$HS_SRC/"*/*"/source/$1.hs" )
     [ -e "$modpath" ] && {
@@ -50,8 +107,7 @@ function HS.isLocalMod() {
 }
 function HS.pp() {
     mkpdir "$1"
-    set -o pipefail
-    grep -v '^\s*#-' "$2" | cpp -DWORLD_IMPORTS -w -include "$3" >"$1"
+    cpp -traditional-cpp -undef -DWORLD_IMPORTS -I"$SETUP_ROOT$HS_POOL" -w -include "$3" "$2" > "$1"
 }
 function HS.cc() {
     mkpdir "$1"
@@ -78,7 +134,7 @@ function HS.pkgMods() {
 }
 function HS.compile() {
     mkpdir "$1" "$2"
-    ghc -optP --include="$4" -o "$1" -ohi "$2" -i"$SETUP_ROOT$HS_OBJ" -c ${5:+$(< "$5")} "$3"
+    ghc -optP --include="$4" -o "$1" -ohi "$2" -I"$SETUP_ROOT$HS_POOL" -i"$SETUP_ROOT$HS_OBJ" -c ${5:+$(< "$5")} "$3"
 }
 function HS.ld() {
     mkpdir "$1"
@@ -148,27 +204,27 @@ function HS.auto_files() {
 		    macros.h)           prepare "$1" = HS.macros "$HS_ETC/packages" "$HS_CONF/base-packages.full";;
 		esac;;
 	    "$HS_PKG")
-		[[ "$path" =~ ([^/]*)/(package\.(tar\.gz|cabal(\.ar-path)?)|exposed-modules|conf.(c-)?manifest|(all-|other-|)extensions|(ext-|ghc-|)options|c-sources|includes) ]] && {
+		[[ "$path" =~ ^([^/]*)/(package\.(tar\.gz|cabal(\.ar-path)?)|modules|conf.(c-)?manifest|(all-|other-|)extensions|(ext-|ghc-|)options|c-sources|includes)$ ]] && {
 		    local pkg="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"
 		    case "$file" in
 			package.tar.gz)		prepare "$1" = Hackage.get -"$pkg";;
 			package.cabal.ar-path)  prepare "$1" = Tar.find -"${pkg%-*}"'\.cabal$' "$HS_PKG/$pkg/package.tar.gz";;
 			package.cabal)		prepare "$1" = Tar.get "$HS_PKG/$pkg/package.tar.gz" "$HS_PKG/$pkg/package.cabal.ar-path";;
-			exposed-modules)        prepare "$1" = Cabal.section -exposed-modules "$HS_PKG/$pkg/package.cabal" -',';;
+			modules)                prepare "$1" = Cabal.section -'(exposed|other)'-modules "$HS_PKG/$pkg/package.cabal" -',';;
 			extensions)             prepare "$1" = Cabal.section -extensions "$HS_PKG/$pkg/package.cabal" -,;;
 			other-extensions)       prepare "$1" = Cabal.section -other-extensions "$HS_PKG/$pkg/package.cabal" -,;;
 			c-sources)              prepare "$1" = Cabal.section -c-sources "$HS_PKG/$pkg/package.cabal" -,;;
-			includes)               prepare "$1" = Cabal.section -includes "$HS_PKG/$pkg/package.cabal" -,;;
+			includes)               prepare "$1" = Cabal.section -'(includes|install-includes)' "$HS_PKG/$pkg/package.cabal" -,;;
 			all-extensions)         prepare "$1" = Concat "$HS_PKG/$pkg/"{other-,}extensions;;
 			ghc-options)            prepare "$1" = Cabal.section -ghc-options "$HS_PKG/$pkg/package.cabal";;
 			ext-options)            prepare "$1" = Foreach -'-X$word' "$HS_PKG/$pkg/all-extensions";;
 			options)                prepare "$1" = Concat "$HS_PKG/$pkg/"{ext,ghc}-options;;
-			conf.manifest)          prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/exposed-modules";;
+			conf.manifest)          prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/modules";;
 			conf.c-manifest)        prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/c-sources" "$HS_PKG/$pkg/includes";;
 		    esac
 		};;
 	    "$HS_DEP"|"$HS_POOL"|"$HS_OBJ")
-		[[ "$path" =~ (.*)\.((c-)?pkg-name|(c-)?pkg\.file|hs(\.ar-path|pp|)|depends|(c-)?o(\.(c-)?files)?|full-o\.files|hi|options\.file|full-deps(\.files)?|pkg-deps(\.files|\.local)?|[ch](-sources(\.files)?|\.ar-path|)|incs|full-incs(\.files)?|bin-(hs|c)-o\.files) ]] && {
+		[[ "$path" =~ ^(.*)\.((c-)?pkg-name|(c-)?pkg\.file|hs(\.ar-path|pp(\.files)?|)|depends|(c-)?o(\.(c-)?files)?|full-o\.files|hi|options\.file|full-deps(\.files)?|pkg-deps(\.files|\.local)?|[ch](-sources(\.files)?|\.ar-path|)|incs|full-incs(\.files)?|bin-(hs|c)-o\.files)$ ]] && {
 		    local mod="${BASH_REMATCH[1]}" ext="${BASH_REMATCH[2]}"
 		    case "$root:$ext"	in
 			"$HS_DEP":pkg-name)
@@ -183,7 +239,14 @@ function HS.auto_files() {
 			"$HS_DEP":c.ar-path)    prepare "$1" = Tar.find -"$mod\\.c\$" @"$HS_DEP/$mod.c-pkg.file";;
 			"$HS_DEP":h.ar-path)    prepare "$1" = Tar.find -"$mod\\.h\$" @"$HS_DEP/$mod.c-pkg.file";;
 			"$HS_POOL":c)           prepare "$1" = Tar.get @"$HS_DEP/$mod.c-pkg.file" "$HS_DEP/$mod.c.ar-path";;
-			"$HS_POOL":h)           prepare "$1" = Tar.get @"$HS_DEP/$mod.c-pkg.file" "$HS_DEP/$mod.h.ar-path";;
+			"$HS_POOL":h)
+			    if [ -e "$SETUP_ROOT$HS_ETC/base-files/$mod.h" ]; then
+				prepare "$1" = Copy "$HS_ETC/base-files/$mod.h"
+			    elif [ "$mod" == ghcautoconf ]; then
+				prepare "$1" = HS.GHCAutoConf
+			    else
+				prepare "$1" = Tar.get @"$HS_DEP/$mod.c-pkg.file" "$HS_DEP/$mod.h.ar-path"
+			    fi;;
 			"$HS_DEP":hs.ar-path)	prepare "$1" = Tar.find -"$mod\\.hsc\\?\$" @"$HS_DEP/$mod.pkg.file";;
 			"$HS_POOL":hs)
 			    if HS.isLocalMod "$mod"; then
@@ -191,7 +254,8 @@ function HS.auto_files() {
  			    else
 				prepare "$1" = HS.get @"$HS_DEP/$mod.pkg.file" "$HS_DEP/$mod.hs.ar-path"
 			    fi;;
-			"$HS_POOL":hspp)		prepare "$1" = HS.pp "$HS_POOL/$mod.hs" "$HS_CONF/macros.h";;
+			"$HS_DEP":hspp.files)           prepare "$1" = Foreach -'$HS_POOL/$word' "$HS_DEP/$mod.hs.full-incs";;
+			"$HS_POOL":hspp)		prepare "$1" = HS.pp "$HS_POOL/$mod.hs" "$HS_CONF/macros.h" @"$HS_DEP/$mod.hspp.files";;
 			"$HS_DEP":depends)		prepare "$1" = HS.depends "$HS_POOL/$mod.hspp" "$HS_CONF/base-modules";;
 			"$HS_DEP":pkg-deps.files)	prepare "$1" = Foreach -'$HS_DEP/${word//.//}.pkg-deps' "$HS_DEP/$mod.depends";;
 			"$HS_DEP":pkg-deps)		prepare "$1" = Sorted "$HS_DEP/$mod.pkg-name" @"$HS_DEP/$mod.pkg-deps.files";;
