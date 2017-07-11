@@ -30,8 +30,10 @@ function Tar() {
 function GZip() { mkpdir "$1"; gzip < "$2" > "$1"; }
 
 function Git.autocommit() {
-    ( cd "$(dirname "$1")" \
+    (
+	msg="$(Setup.targets autocommit)"
+	cd "$(dirname "$1")" \
 	  && git add -A \
-	  && git commit -m "${PKG_AUTOCOMMIT_MESSAGE:-Automatic commit on $(date)}" )
+	  && git commit -m "${msg:-Automatic commit on $(date)}" )
     touch "$1"
 }

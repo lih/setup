@@ -1,29 +1,19 @@
 #!/bin/bash
-declare -gA SETUP_STATE=( )
-declare -gA SETUP_MODULES=( )
-declare -gA SETUP_ARGS=( )
-
-declare -ga SETUP_FAILED=( )
-declare -ga SETUP_SOURCE_FILES=( )
-declare -ga SETUP_AUTO_DEPEND_HOOKS=( )
-
-declare -g SETUP_JOBS=8
-declare -g SETUP_STATE_FILE=
-declare -g SETUP_ROOT="$PWD"
-declare -g SETUP_PREFIX=
-declare -g SETUP_TMPDIR="$(mktemp -d)"
-
-function Setup.mkqueue() {
-    local sem stream mutex
-    mkfifo "$SETUP_TMPDIR/$2"_{sem,stream,mutex}
-    exec {sem}<>"$SETUP_TMPDIR/${2}_sem" \
-	 {stream}<>"$SETUP_TMPDIR/${2}_stream" \
-	 {mutex}<>"$SETUP_TMPDIR/${2}_mutex"
-    printf . >&"$mutex" &
-    declare -g "$1"="$sem $stream $mutex"
-}
-Setup.mkqueue SETUP_WORKER worker
-Setup.mkqueue SETUP_MASTER master
+declare -g \
+	SETUP_JOBS=8 \
+        SETUP_STATE_FILE= \
+        SETUP_ROOT="$PWD" \
+        SETUP_PREFIX= \
+        SETUP_TMPDIR="$(mktemp -d)"
+declare -ga \
+	SETUP_FAILED=( ) \
+        SETUP_SOURCE_FILES=( ) \
+        SETUP_AUTO_DEPEND_HOOKS=( )
+declare -gA \
+	SETUP_STATE=( ) \
+        SETUP_GEN_SOURCES=( ) \
+        SETUP_MODULES=( ) \
+        SETUP_ARGS=( )
 
 declare arg
 for arg; do
@@ -36,8 +26,36 @@ else
     function Setup.log.INFO() { :; }
 fi
 function Setup.log.CRIT() { printf "[CRIT:${BASHPID:-$$}]: %s\n" "$*" >&2; }
+
 function Setup.log() { Setup.log."$1" "${@:2}"; }
 function Setup.trace() { Setup.log INFO "$@" >&2; "$@"; }
+
+function Setup.send() {
+    (
+        read -u"$3" -n1
+        printf . >&"$1"
+        if [ -n "$5" ]; then printf "${@:5}"; fi
+        printf "%s\n" "$4" >&"$2"
+    ) &
+}
+function Setup.receive() {
+    read -u"$1" -n1 \
+        && read -r -u"$2" "$4"
+    local ret="$?"
+    printf . >&"$3" &
+    return "$ret"
+}
+function Setup.mkqueue() {
+    local sem stream mutex
+    mkfifo "$SETUP_TMPDIR/$2"_{sem,stream,mutex}
+    exec {sem}<>"$SETUP_TMPDIR/${2}_sem" \
+	 {stream}<>"$SETUP_TMPDIR/${2}_stream" \
+	 {mutex}<>"$SETUP_TMPDIR/${2}_mutex"
+    printf . >&"$mutex" &
+    declare -g "$1"="$sem $stream $mutex"
+}
+Setup.mkqueue SETUP_WORKER worker
+Setup.mkqueue SETUP_MASTER master
 
 function Setup.dumpState() {
     local k
@@ -74,22 +92,6 @@ function Setup.getArr() {
     done    
 }
 function Setup.setVal() { SETUP_STATE[$1]="$2"; }
-
-function Setup.receive() {
-    read -u"$1" -n1 \
-        && read -r -u"$2" "$4"
-    local ret="$?"
-    printf . >&"$3" &
-    return "$ret"
-}
-function Setup.send() {
-    (
-        read -u"$3" -n1
-        printf . >&"$1"
-        if [ -n "$5" ]; then printf "${@:5}"; fi
-        printf "%s\n" "$4" >&"$2"
-    ) &
-}
 
 function Setup.addPrefix() {
     local __arr="$1"
@@ -208,7 +210,113 @@ function Setup.need() {
     fi	
 }
 
-# Usage : prepare file... = cmd [file|@file|:tag]...
+function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
+function Setup.targets() {
+    local tgt
+    for tgt; do
+	[ "${SETUP_ARGS[${tgt#-}]+x}" == x ] && \
+	    if [[ "$tgt" != -* ]]; then printf "%s\n" "${SETUP_ARGS[${tgt#-}]}"; fi \
+	    && return
+    done
+    return 1
+}
+function Setup.touch() {
+    local file="$1" inc=1 next
+    local stat="${SETUP_STATE[$file.status]}"
+    local -a nexts
+    if [ "$stat" == 2:done ]; then inc=0; fi
+
+    Setup.getArr nexts "$file.next-defined"
+    for next in "${nexts[@]}"; do
+	case "${SETUP_STATE[$next.status]}" in
+	    0:defined) SETUP_STATE[$next.depc]=$((SETUP_STATE[$next.depc]+inc));;
+	    *) SETUP_STATE[$next.status]=0:defined
+	       SETUP_STATE[$next.depc]=$inc ;&
+	    2:done) Setup.touch "$next" ;;
+	esac
+	if (( ${SETUP_STATE[$next.depc]} == 0 )); then
+	    Setup.primeCan "$next"
+	fi
+    done
+
+    Setup.getArr nexts "$file.next-primed"
+    for next in "${nexts[@]}"; do
+	case "${SETUP_STATE[$next.status]}" in
+	    1:primed) SETUP_STATE[$next.argc]=$((SETUP_STATE[$next.argc]+inc));;
+	    2:done) SETUP_STATE[$next.status]=1:primed
+		    SETUP_STATE[$next.argc]=$inc
+		    Setup.touch "$next";;
+	esac
+	if (( ${SETUP_STATE[$next.argc]} == 0 )); then
+	    SETUP_LEAVES+=( "$next" )
+	fi
+    done
+
+    if [ "$stat" == 2:done ]; then
+	local leaf
+	local -a old_leaves=( "${SETUP_LEAVES[@]}" )
+	SETUP_LEAVES=( )
+	for leaf in "${old_leaves[@]}"; do
+	    if [ "${SETUP_STATE[$leaf.status]}" == 1:primed ] \
+		   && [ "${SETUP_STATE[$leaf.argc]}" == 0 ]; then
+		SETUP_LEAVES+=( "$leaf" )
+	    fi
+	done
+    fi
+}
+function Setup.state-file() {
+    SETUP_STATE_FILE="$1"
+    if [ -r "$SETUP_STATE_FILE" ]; then
+	source "$SETUP_STATE_FILE"
+	SETUP_LEAVES=( "${SETUP_FAILED[@]}" )
+	SETUP_FAILED=( )
+	local src ts
+	for src in "${SETUP_SOURCE_FILES[@]}"; do
+	    ts="$(date +"%s 10#%N" -r "$src")"
+	    if [ "${SETUP_STATE[$src.timestamp]}" != "$ts" ]; then
+		SETUP_STATE[$src.timestamp]="$ts"
+		Setup.touch "$src"
+	    fi
+	done
+	for src in "${!SETUP_GEN_SOURCES[@]}"; do
+	    Setup.touch "$src"
+	done
+    fi 
+}
+function Setup.use() {
+    local mod
+    for mod; do
+	if [ "${SETUP_MODULES[$mod]:+x}" == '' ]; then
+	    source "$SETUP_INSTALL_DIR/lib/setup.d/${mod%.shl}.shl"
+	    SETUP_MODULES[$mod]=true
+	fi
+    done
+}
+function Setup.load() {
+    local path="${1%/*}" file="${1##*/}"
+    shift
+    local SETUP_PREFIX="$SETUP_PREFIX$path/"
+    pushd "$path" >/dev/null && {
+	source "$file"
+	popd >/dev/null
+    }
+}
+
+function Setup.atexit() {
+    if [ -n "$SETUP_STATE_FILE" ]; then
+	{
+	    SETUP_OLD_NEEDED=( )
+	    for k in "${!SETUP_STATE[@]}"; do if [[ "$k" == *.needed ]]; then unset SETUP_STATE[$k]; SETUP_OLD_NEEDED+=( "$k" ); fi; done
+	    declare -p -A SETUP_STATE
+	    declare -p -a SETUP_SOURCE_FILES SETUP_FAILED
+	    declare -p -A SETUP_GEN_SOURCES
+	} | sed 's/^declare/declare -g/' >"$SETUP_STATE_FILE"
+    fi
+    rm -rf "$SETUP_TMPDIR"
+}
+trap Setup.atexit EXIT
+
+# Usage : prepare file... = cmd [file|@file|-tag]...
 function prepare() {
     local -a targets
     while [ "$1" != '=' ]; do
@@ -293,7 +401,7 @@ function setup() {
         case "$stat" in
 	    0)
                 local -a nexts
-                local x depc argc
+                local x depc argc isSrc=0
                 Setup.getArr nexts "$can.next-defined"
                 for x in "${nexts[@]}"; do
 		    depc="${SETUP_STATE[$x.depc]}"
@@ -301,17 +409,22 @@ function setup() {
 		    if ((depc == 1)); then
                         Setup.primeCan "$x"
 		    fi
-                done
+		    if [ "${SETUP_STATE[$x.needed]}" != true ]; then
+			isSrc=1
+		    fi
+		done
 
                 Setup.getArr nexts "$can.next-primed"
                 for x in "${nexts[@]}"; do
 		    argc="${SETUP_STATE[$x.argc]}"
 		    SETUP_STATE[$x.argc]=$((argc-1))
-		    if ((argc == 1)) && [ "${SETUP_STATE[$x.needed]}" == true ]; then
-                        SETUP_LEAVES+=( "$x" )
+		    if [ "${SETUP_STATE[$x.needed]}" == true ]; then
+			if ((argc == 1)); then SETUP_LEAVES+=( "$x" ); fi
+		    else
+			isSrc=1
 		    fi
                 done
-
+		if ((isSrc==1)); then SETUP_GEN_SOURCES[$can]=1; fi
                 ((nl+=${#SETUP_LEAVES[@]}))
                 Setup.runLeaves
                 ;;
@@ -333,107 +446,3 @@ function setup() {
 
     return "$ret"
 }
-
-function Setup.touch() {
-    local file="$1" inc=1 next
-    local stat="${SETUP_STATE[$file.status]}"
-    local -a nexts
-    if [ "$stat" == 2:done ]; then inc=0; fi
-
-    Setup.getArr nexts "$file.next-defined"
-    for next in "${nexts[@]}"; do
-	case "${SETUP_STATE[$next.status]}" in
-	    0:defined) SETUP_STATE[$next.depc]=$((SETUP_STATE[$next.depc]+inc));;
-	    *) SETUP_STATE[$next.status]=0:defined
-	       SETUP_STATE[$next.depc]=$inc ;&
-	    2:done) Setup.touch "$next" ;;
-	esac
-	if (( ${SETUP_STATE[$next.depc]} == 0 )); then
-	    Setup.primeCan "$next"
-	fi
-    done
-
-    Setup.getArr nexts "$file.next-primed"
-    for next in "${nexts[@]}"; do
-	case "${SETUP_STATE[$next.status]}" in
-	    1:primed) SETUP_STATE[$next.argc]=$((SETUP_STATE[$next.argc]+inc));;
-	    2:done) SETUP_STATE[$next.status]=1:primed
-		    SETUP_STATE[$next.argc]=$inc
-		    Setup.touch "$next";;
-	esac
-	if (( ${SETUP_STATE[$next.argc]} == 0 )); then
-	    SETUP_LEAVES+=( "$next" )
-	fi
-    done
-
-    if [ "$stat" == 2:done ]; then
-	local leaf
-	local -a old_leaves=( "${SETUP_LEAVES[@]}" )
-	SETUP_LEAVES=( )
-	for leaf in "${old_leaves[@]}"; do
-	    if [ "${SETUP_STATE[$leaf.status]}" == 1:primed ] \
-		   && [ "${SETUP_STATE[$leaf.argc]}" == 0 ]; then
-		SETUP_LEAVES+=( "$leaf" )
-	    fi
-	done
-    fi
-}
-function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
-
-function Setup.targets() {
-    local tgt
-    for tgt; do
-	[ "${SETUP_ARGS[${tgt#-}]+x}" == x ] && \
-	    if [[ "$tgt" != -* ]]; then printf "%s\n" "${SETUP_ARGS[${tgt#-}]}"; fi \
-	    && return
-    done
-    return 1
-}
-function Setup.state-file() {
-    SETUP_STATE_FILE="$1"
-    if [ -r "$SETUP_STATE_FILE" ]; then
-	source "$SETUP_STATE_FILE"
-	SETUP_LEAVES=( "${SETUP_FAILED[@]}" )
-	SETUP_FAILED=( )
-	local src ts
-	for src in "${SETUP_SOURCE_FILES[@]}"; do
-	    ts="$(date +"%s 10#%N" -r "$src")"
-	    if [ "${SETUP_STATE[$src.timestamp]}" != "$ts" ]; then
-		SETUP_STATE[$src.timestamp]="$ts"
-		Setup.touch "$src"
-	    fi
-	done
-    fi 
-}
-function Setup.use() {
-    local mod
-    for mod; do
-	if [ "${SETUP_MODULES[$mod]:+x}" == '' ]; then
-	    source "$SETUP_INSTALL_DIR/lib/setup.d/${mod%.shl}.shl"
-	    SETUP_MODULES[$mod]=true
-	fi
-    done
-}
-function Setup.load() {
-    local path="${1%/*}" file="${1##*/}"
-    shift
-    local SETUP_PREFIX="$SETUP_PREFIX$path/"
-    pushd "$path" >/dev/null && {
-	source "$file"
-	popd >/dev/null
-    }
-}
-
-function Setup.atexit() {
-    if [ -n "$SETUP_STATE_FILE" ]; then
-	{
-	    SETUP_OLD_NEEDED=( )
-	    for k in "${!SETUP_STATE[@]}"; do if [[ "$k" == *.needed ]]; then unset SETUP_STATE[$k]; SETUP_OLD_NEEDED+=( "$k" ); fi; done
-	    declare -p -A SETUP_STATE
-	    declare -p -a SETUP_SOURCE_FILES SETUP_FAILED SETUP_OLD_NEEDED
-	} | sed 's/^declare/declare -g/' >"$SETUP_STATE_FILE"
-    fi
-    rm -rf "$SETUP_TMPDIR"
-}
-
-trap Setup.atexit EXIT
