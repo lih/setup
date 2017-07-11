@@ -35,6 +35,7 @@ function Cabal.section() {
     local field="${2#-}"
     mkpdir "$1"
     local text="$(sed -rn '
+/^\s*--/d
 /^library/I,/^\S/{
   /^\s+'"$field"':/I{
     :loop;{
@@ -98,13 +99,6 @@ EOF
     "$1.x" > "$1"
     rm -f "$1.x"
 }
-function HS.isLocalMod() {
-    local modpath=( "$SETUP_ROOT$HS_SRC/"*/*"/source/$1.hs" )
-    [ -e "$modpath" ] && {
-	modpath="${modpath#$SETUP_ROOT$HS_SRC/}"
-	HS_MOD_PATH="${modpath%/source/*}"
-    }
-}
 function HS.pp() {
     mkpdir "$1"
     cpp -traditional-cpp -undef -DWORLD_IMPORTS -I"$SETUP_ROOT$HS_POOL" -w -include "$3" "$2" > "$1"
@@ -138,7 +132,11 @@ function HS.compile() {
 }
 function HS.ld() {
     mkpdir "$1"
-    ghc -o "$1" "${@:2}"
+    local -a pkgs=( $(< "$2") )
+    local -a opts=( -hide-all-packages ${pkgs[@]/#/-package } )
+    
+    echo ghc "${opts[@]}" -o "$1" "${@:3}"
+    ghc "${opts[@]}" -o "$1" "${@:3}"
 }
 function HS.fullPkgs() {
     local pkg vers
@@ -189,6 +187,13 @@ function HS.includes() {
     sed -rn 's,^\s*#\s*include\s*"(.*)"\s*$,\1,p' "$2" > "$1"
 }
 
+function HS.isLocalMod() {
+    local modpath=( "$SETUP_ROOT$HS_SRC/"*/*"/source/$1.hs" )
+    [ -e "$modpath" ] && {
+	modpath="${modpath#$SETUP_ROOT$HS_SRC/}"
+	HS_MOD_PATH="${modpath%/source/*}"
+    }
+}
 function HS.auto_files() {
     [[ "$1" =~ ^("$HS_PKG"|"$HS_DEP"|"$HS_CONF"|"$HS_POOL"|"$HS_OBJ"|"$HS_BIN")/(.*) ]] && {
 	local root="${BASH_REMATCH[1]}" path="${BASH_REMATCH[2]}"
@@ -285,7 +290,7 @@ function HS.auto_files() {
 			*) return 1;;
 		    esac
 		};;
-	    "$HS_BIN") prepare "$1" = HS.ld "$HS_OBJ/${path//.//}.o" @"$HS_DEP/${path//.//}.bin-"{c,hs}"-o.files";;
+	    "$HS_BIN") prepare "$1" = HS.ld "$HS_ETC/base-packages" "$HS_OBJ/${path//.//}.o" @"$HS_DEP/${path//.//}.bin-"{c,hs}"-o.files";;
 	esac
     }    
 }

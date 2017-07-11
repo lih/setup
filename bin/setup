@@ -17,7 +17,7 @@ fi
 : ${SETUP_INSTALL_DIR:=/usr}
 source "$SETUP_INSTALL_DIR/lib/setup.shl"
 Setup.use base
-source "$program" "$@"
+source "$program" --
 setup
 red=$'\033[31m'
 yellow=$'\033[33m'
