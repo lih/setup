@@ -294,4 +294,4 @@ function HS.auto_files() {
 	esac
     }    
 }
-Setup.addHooks HS.auto_files
+Setup.hook HS.auto_files

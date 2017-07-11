@@ -378,7 +378,7 @@ function Setup.touch() {
 	done
     fi
 }
-function Setup.addHooks() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
+function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
 
 function Setup.targets() {
     local tgt

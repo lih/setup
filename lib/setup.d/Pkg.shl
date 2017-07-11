@@ -253,7 +253,7 @@ function Pkg.auto-files() {
 	}
     } 
 }
-Setup.addHooks Pkg.auto-files
+Setup.hook Pkg.auto-files
 
 function Pkg.package() {
     local -a PKG_FILES=( )

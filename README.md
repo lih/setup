@@ -75,7 +75,7 @@ be equivalent to the above rule :
             *) return 1;;
         esac
     }
-    Setup.addHooks C.auto_o
+    Setup.hook C.auto_o
 
 It doesn't look as pretty, but it is a much more powerful way to
 describe automatic dependencies, as it allows the full power of Bash

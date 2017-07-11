@@ -16,4 +16,4 @@ function Doc.auto_files() {
 	esac
     }    
 }
-Setup.addHooks Doc.auto_files
+Setup.hook Doc.auto_files

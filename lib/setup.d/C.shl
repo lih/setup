@@ -17,4 +17,4 @@ function C.auto_includes() {
     } 
 }
 
-Setup.addHooks C.auto_o C.auto_includes
+Setup.hook C.auto_o C.auto_includes
