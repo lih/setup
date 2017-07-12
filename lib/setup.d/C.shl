@@ -1,20 +1,24 @@
 #!/bin/bash
-function gcc-c() { sleep 2; gcc -c "$2" ${SRCDIR:+-I"$SRCDIR"} -o "$1"; }
-function ld-o() { gcc -o "$1" "${@:2}"; }
-function c-includes() { sed 's,#include "(.*)",'"${SRCDIR:+$SRCDIR/}"'\1,p' -rn "$2" > "$1"; }
+: ${C_PREFIX="/$SETUP_PREFIX"}
+: ${C_BUILD="${C_PREFIX}.build"}
+: ${C_SRC="${C_PREFIX}src"}
+: ${C_DEP="${C_BUILD}/dep"}
+: ${C_OBJ="${C_BUILD}/obj"}
+: ${C_BIN="${C_BUILD}/bin"}
 
-function C.auto_o() {
-    [[ "$1" == *.o ]] && {
-        local baseName="${1%.o}.c"
-        local sourceName="${baseName/#$BUILDDIR/$SRCDIR}"
-        prepare "$1" = gcc-c "$sourceName" @"$baseName.incs"
+function C.compile() { gcc -c "$2" ${C_SRC:+-I"$C_SRC"} -o "$1"; }
+function C.ld() { gcc -o "$1" "${@:2}"; }
+function C.includes() { sed 's,#include "(.*)",'"${C_SRC:+$C_SRC/}"'\1,p' -rn "$2" > "$1"; }
+
+Setup.hook C.auto-files
+function C.auto-files() {
+    {
+	[[ "$1" =~ ^("$C_OBJ"|"$C_DEP")/(.*)\.(o|includes)$ ]] && {
+	    local ext="${BASH_REMATCH[2]}" path="${BASH_REMATCH[1]}"
+	    case "$ext" in
+		o)        prepare "$1" = C.compile "$C_SRC/$path.c" @"$C_DEP/$path.includes";;
+		includes) prepare "$1" = C.includes "$C_SRC/$path.c";;
+	    esac
+	}
     }
 }
-function C.auto_includes() {
-    [[ "$1" == *.incs ]] && {
-        local sourceName="${1/#$BUILDDIR/$SRCDIR}"
-        prepare "$1" = c-includes "${sourceName%.incs}"
-    } 
-}
-
-Setup.hook C.auto_o C.auto_includes

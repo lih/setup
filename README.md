@@ -130,7 +130,7 @@ which indicates that, in order to compute `"$file.o"`, we first need
 to compute a list of include names in `"$file.includes"`, then splice
 that list and use each element as a dependency. 
 
-### Composability
+### Nested builds
 
 Suppose you have two projects, A and B, such that A needs a part of B
 to do its job (imagine that B can produce a certain library, which A
@@ -140,11 +140,28 @@ would be able to load B's build script, and add its own rules before
 running a full-blown build operation with all the information it
 needs, without any changes to B whatsoever.
 
-Traditional build tools don't usually integrate well with such nested
-projects, instead resorting to separate sub-processes running their
-own dependency resolution, and coarse-grained parallelization. 
+Setup.shl allows this workflow by providing a function, `Setup.load`,
+which -- as the name implies -- loads a nested Setup script from a
+parent context in order to use its productions later on.
 
-To solve this problem, Setup.shl provides a function, `Setup.load`,
-which -- as the name implies -- loads a nested Setup script inside a
-containing context in order to use its productions later on.
+As a motivating example, consider a two-phase build of a C program :
+one phase builds the binaries and libraries, and the second phase
+builds a distribution package from those artifacts. 
 
+file: C_proj/Setup
+
+    #!/usr/bin/setup
+    Setup.use C
+    prepare main = C.ld main.o
+
+file: Setup
+
+    #!/usr/bin/setup
+    Setup.use Pkg
+    Setup.load C_proj/Setup
+    
+    Pkg.package Pkg.files usr/bin/main=C_proj/main
+
+From this setup, any update to a C source file in `C_proj` will be
+detected by the packaging script, and cause the necesary compilation
+steps to be taken before rebuilding the affected packages.
