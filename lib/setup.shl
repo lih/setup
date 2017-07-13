@@ -18,10 +18,13 @@ declare -gA \
 
 shopt -s extglob
 
-declare arg
-for arg; do
-    SETUP_PARAMS[${arg%%=*}]="${arg##*([^=])?(=)}"
-done
+function Setup.setArgs() {
+    declare arg
+    for arg; do
+        SETUP_PARAMS[${arg%%=*}]="${arg##*([^=])?(=)}"
+    done
+}
+Setup.setArgs "$@"
 
 if [ "${SETUP_LOGLEVEL:-0}" -gt 0 ]; then
     function Setup.log.INFO() { printf "[INFO:${BASHPID:-$$}]: %s\n" "$*" >&2; }
@@ -371,15 +374,21 @@ function Setup.use() {
     done
 }
 function Setup.load() {
-    local arg pref="$SETUP_PREFIX"
-    for arg; do
-        local path="${arg%/*}" file="${arg##*/}"
-        local SETUP_PREFIX="$pref$path/"
-        pushd "$path" >/dev/null && {
-	    source "$file" --
-	    popd >/dev/null
-        }
-    done       
+    local pref="$SETUP_PREFIX" path file
+
+    local old_params="$(declare -p -A SETUP_PARAMS)"
+    declare -A SETUP_PARAMS
+
+    path="${1%/*}"; file="${1##*/}"
+    shift
+
+    local SETUP_PREFIX="$pref$path/"
+    eval "SETUP_PARAMS=${old_params#*=}"
+    Setup.setArgs "$@"
+    pushd "$path" >/dev/null && {
+        source "$file" --
+	popd >/dev/null
+    }
 }
 
 function Setup.atexit() {

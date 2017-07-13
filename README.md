@@ -91,28 +91,42 @@ variables :
             ...
         fi
 
+    These flag can then be triggered by running the commands `setup
+    install` or `setup target=TARGET`.
+
   - the `Setup.use MODULE...` function loads modules from the
     `$SETUP_INSTALL_DIR/lib/setup.d/MODULE.shl` files. It's basically
-    a wrapper around `source`. After loading a module, it also tries
-    to sources a local module file from `.setup/lib/MODULE.shl` if it
-    exists, allowing you to override some module-specific functions if
-    you need to.
+    a wrapper around `source`.
 
-  - the `Setup.load SETUP_FILE...` function loads other Setup files in
-    this context, in order to use their files as dependencies.
+    After loading a module, it also tries to sources a local module
+    file from `.setup/lib/MODULE.shl` if it exists, allowing you to
+    override some module-specific functions if you need to.
 
+  - the `Setup.load SETUP_FILE PARAM...` function load another Setup
+    file in the current context, in order to use its preparations as
+    dependencies further down the line.
+
+    Each PARAM can be what you would specify on the command-line for a
+    standalone invocation, such as `install` or `target=X` (see the
+    `Setup.params` function for more information), and is made
+    available alongside the PARAMs of the current context, overriding
+    them when a conflict arises.
+    
   - the `Setup.hook FUNCTION...` can be used to define new automatic
-    dependency generators. A generator is a function which take a
-    single file name as argument, and should prepare this file if it
-    knows how. Otherwise, it should return non-zero to signal to try
-    the next generator.
+    dependency generators.
+
+    A generator is a function which take a single file name as
+    argument, and should prepare this file if it knows how. Otherwise,
+    it should return non-zero to signal to try the next generator.
 
   - the `Setup.state-file NAME` function specifies an optional state
     file, which is used by Setup.shl to remember information from one
     build to the next and speed up dependency resolution upon
-    successive invocations of `setup`. This file is created
-    automatically by Setup.shl and can safely be deleted if it causes
-    problems (it shouldn't but there are always exceptions).
+    successive invocations of `setup`.
+
+    This file is created automatically by Setup.shl and can safely be
+    deleted if it causes problems (it shouldn't but there are always
+    exceptions).
 
     Warning: the `prepare` function doesn't do anything if a file is
     already known to the build system. When using a state file, that
