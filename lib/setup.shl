@@ -13,7 +13,6 @@ declare -ga \
 declare -gA \
 	SETUP_STATE=( ) \
 	SETUP_LEAVES=( ) \
-        SETUP_GEN_SOURCES=( ) \
         SETUP_MODULES=( ) \
         SETUP_ARGS=( )
 
