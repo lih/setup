@@ -131,11 +131,11 @@ variables :
 
     Warning: the `prepare` function doesn't do anything if a file is
     already known to the build system. When using a state file, that
-    means that one a file is specified, you can no longer change the
+    means that once a file is specified, you can no longer change the
     command it is associated with, or its arguments (splice arguments
     are still recomputed correctly, don't worry), even in subsequent
     builds. If that happens, simply delete the state file, and restart
-    the build to acknowledge the new dependy graph.
+    the build to acknowledge the new dependency graph.
 
 ### Automatic targets via dependency hooks
 
