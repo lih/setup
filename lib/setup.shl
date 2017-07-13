@@ -345,17 +345,19 @@ function Setup.invalidate() {
     done
 }
 function Setup.state-file() {
-    SETUP_STATE_FILE="$1"
-    if [ -r "$SETUP_STATE_FILE" ]; then
-	source "$SETUP_STATE_FILE"
-	local src ts
-	for src in "${SETUP_SOURCE_FILES[@]}"; do
-	    ts="$(date +"%s 10#%N" -r "$src")"
-	    if [ "${SETUP_STATE[$src.timestamp]}" != "$ts" ]; then
-		SETUP_STATE[$src.timestamp]="$ts"
-	    fi
-	done
-    fi 
+    if [ -z "$SETUP_STATE_FILE" ]; then
+	SETUP_STATE_FILE="$1"
+	if [ -r "$SETUP_STATE_FILE" ]; then
+	    source "$SETUP_STATE_FILE"
+	    local src ts
+	    for src in "${SETUP_SOURCE_FILES[@]}"; do
+		ts="$(date +"%s 10#%N" -r "$src")"
+		if [ "${SETUP_STATE[$src.timestamp]}" != "$ts" ]; then
+		    SETUP_STATE[$src.timestamp]="$ts"
+		fi
+	    done
+	fi
+    fi
 }
 function Setup.use() {
     local mod

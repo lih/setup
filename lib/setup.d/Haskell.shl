@@ -209,25 +209,29 @@ function HS.auto_files() {
 		    macros.h)           prepare "$1" = HS.macros "$HS_ETC/packages" "$HS_CONF/base-packages.full";;
 		esac;;
 	    "$HS_PKG")
-		[[ "$path" =~ ^([^/]*)/(package\.(tar\.gz|cabal(\.ar-path)?)|modules|conf.(c-)?manifest|(all-|other-|)extensions|(ext-|ghc-|)options|c-sources|includes)$ ]] && {
-		    local pkg="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"
-		    case "$file" in
-			package.tar.gz)		prepare "$1" = Hackage.get -"$pkg";;
-			package.cabal.ar-path)  prepare "$1" = Tar.find -"${pkg%-*}"'\.cabal$' "$HS_PKG/$pkg/package.tar.gz";;
-			package.cabal)		prepare "$1" = Tar.get "$HS_PKG/$pkg/package.tar.gz" "$HS_PKG/$pkg/package.cabal.ar-path";;
-			modules)                prepare "$1" = Cabal.section -'(exposed|other)'-modules "$HS_PKG/$pkg/package.cabal" -',';;
-			extensions)             prepare "$1" = Cabal.section -extensions "$HS_PKG/$pkg/package.cabal" -,;;
-			other-extensions)       prepare "$1" = Cabal.section -other-extensions "$HS_PKG/$pkg/package.cabal" -,;;
-			c-sources)              prepare "$1" = Cabal.section -c-sources "$HS_PKG/$pkg/package.cabal" -,;;
-			includes)               prepare "$1" = Cabal.section -'(includes|install-includes)' "$HS_PKG/$pkg/package.cabal" -,;;
-			all-extensions)         prepare "$1" = Concat "$HS_PKG/$pkg/"{other-,}extensions;;
-			ghc-options)            prepare "$1" = Cabal.section -ghc-options "$HS_PKG/$pkg/package.cabal";;
-			ext-options)            prepare "$1" = Foreach -'-X$word' "$HS_PKG/$pkg/all-extensions";;
-			options)                prepare "$1" = Concat "$HS_PKG/$pkg/"{ext,ghc}-options;;
-			conf.manifest)          prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/modules";;
-			conf.c-manifest)        prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/c-sources" "$HS_PKG/$pkg/includes";;
-		    esac
-		};;
+		if [ -e "$SETUP_ROOT$HS_SRC/$path" ]; then
+		    prepare "$1" = Copy "$HS_SRC/$path"
+		else
+		    [[ "$path" =~ ^([^/]*)/(package\.(tar\.gz|cabal(\.ar-path)?)|modules|conf.(c-)?manifest|(all-|other-|)extensions|(ext-|ghc-|)options|c-sources|includes)$ ]] && {
+			local pkg="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"
+			case "$file" in
+			    package.tar.gz)		prepare "$1" = Hackage.get -"$pkg";;
+			    package.cabal.ar-path)  prepare "$1" = Tar.find -"${pkg%-*}"'\.cabal$' "$HS_PKG/$pkg/package.tar.gz";;
+			    package.cabal)		prepare "$1" = Tar.get "$HS_PKG/$pkg/package.tar.gz" "$HS_PKG/$pkg/package.cabal.ar-path";;
+			    modules)                prepare "$1" = Cabal.section -'(exposed|other)'-modules "$HS_PKG/$pkg/package.cabal" -',';;
+			    extensions)             prepare "$1" = Cabal.section -extensions "$HS_PKG/$pkg/package.cabal" -,;;
+			    other-extensions)       prepare "$1" = Cabal.section -other-extensions "$HS_PKG/$pkg/package.cabal" -,;;
+			    c-sources)              prepare "$1" = Cabal.section -c-sources "$HS_PKG/$pkg/package.cabal" -,;;
+			    includes)               prepare "$1" = Cabal.section -'(includes|install-includes)' "$HS_PKG/$pkg/package.cabal" -,;;
+			    all-extensions)         prepare "$1" = Concat "$HS_PKG/$pkg/"{other-,}extensions;;
+			    ghc-options)            prepare "$1" = Cabal.section -ghc-options "$HS_PKG/$pkg/package.cabal";;
+			    ext-options)            prepare "$1" = Foreach -'-X$word' "$HS_PKG/$pkg/all-extensions";;
+			    options)                prepare "$1" = Concat "$HS_PKG/$pkg/"{ext,ghc}-options;;
+			    conf.manifest)          prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/modules";;
+			    conf.c-manifest)        prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/c-sources" "$HS_PKG/$pkg/includes";;
+			esac
+		    }
+		fi;;
 	    "$HS_DEP"|"$HS_POOL"|"$HS_OBJ")
 		[[ "$path" =~ ^(.*)\.((c-)?pkg-name|(c-)?pkg\.file|hs(\.ar-path|pp(\.files)?|)|depends|(c-)?o(\.(c-)?files)?|full-o\.files|hi|options\.file|full-deps(\.files)?|pkg-deps(\.files|\.local)?|[ch](-sources(\.files)?|\.ar-path|)|incs|full-incs(\.files)?|bin-(hs|c)-o\.files)$ ]] && {
 		    local mod="${BASH_REMATCH[1]}" ext="${BASH_REMATCH[2]}"
