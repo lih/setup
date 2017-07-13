@@ -308,7 +308,7 @@ function Setup.need() {
 }
 
 function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
-function Setup.targets() {
+function Setup.params() {
     local tgt
     for tgt; do
 	[ "${SETUP_ARGS[${tgt#-}]+x}" == x ] && {
@@ -371,13 +371,16 @@ function Setup.use() {
     done
 }
 function Setup.load() {
-    local path="${1%/*}" file="${1##*/}"
-    shift
-    local SETUP_PREFIX="$SETUP_PREFIX$path/"
-    pushd "$path" >/dev/null && {
-	source "$file"
-	popd >/dev/null
-    }
+    local arg
+    for arg; do
+        local path="${arg%/*}" file="${arg##*/}"
+        shift
+        local SETUP_PREFIX="$SETUP_PREFIX$path/"
+        pushd "$path" >/dev/null && {
+	    source "$file"
+	    popd >/dev/null
+        }
+    done       
 }
 
 function Setup.atexit() {

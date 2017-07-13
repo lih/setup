@@ -31,7 +31,7 @@ function GZip() { mkpdir "$1"; gzip < "$2" > "$1"; }
 
 function Git.autocommit() {
     (
-	msg="$(Setup.targets autocommit)"
+	msg="$(Setup.params autocommit)"
 	cd "$(dirname "$1")" \
 	  && git add -A \
 	  && git commit -m "${msg:-Automatic commit on $(date)}" )
