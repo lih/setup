@@ -323,32 +323,26 @@ function Setup.invalidate() {
     local file="$1" next
     local stat="${SETUP_STATE[$file.status]}"
     local -a nexts
+
     Setup.getArr nexts "$file.next-defined"
     for next in "${nexts[@]}"; do
 	case "${SETUP_STATE[$next.status]}" in
-	    0:defined) SETUP_STATE[$next.depc]=$((SETUP_STATE[$next.depc]+1));;
+	    0:defined) (( SETUP_STATE[$next.depc]+=1 ));;
 	    *) SETUP_STATE[$next.status]=0:defined
 	       SETUP_STATE[$next.depc]=1 ;;&
 	    2:done) Setup.invalidate "$next" ;;
 	esac
-	if (( ${SETUP_STATE[$next.depc]} == 0 )); then
-	    Setup.primeCan "$next"
-	fi
     done
 
     Setup.getArr nexts "$file.next-primed"
     for next in "${nexts[@]#*:}"; do
 	case "${SETUP_STATE[$next.status]}" in
-	    1:primed) SETUP_STATE[$next.argc]=$((SETUP_STATE[$next.argc]+1));;
+	    1:primed) (( SETUP_STATE[$next.argc]+=1 ));;
 	    2:done) SETUP_STATE[$next.status]=1:primed
 		    SETUP_STATE[$next.argc]=1
 		    Setup.invalidate "$next";;
 	esac
-	if (( ${SETUP_STATE[$next.argc]} == 0 )); then
-	    SETUP_LEAVES[$next]=1
-	fi
     done
-    
 }
 function Setup.state-file() {
     SETUP_STATE_FILE="$1"
@@ -462,8 +456,6 @@ function setup() {
 	Setup.need "$arg"
     done
 
-    Setup.dumpState > "$SETUP_ROOT/test.state"
-    
     local nl="${#SETUP_LEAVES[@]}" can stat ret=0
     Setup.runLeaves
     while ((nl>0)) && {
