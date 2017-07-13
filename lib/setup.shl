@@ -14,13 +14,13 @@ declare -gA \
 	SETUP_STATE=( ) \
 	SETUP_LEAVES=( ) \
         SETUP_MODULES=( ) \
-        SETUP_ARGS=( )
+        SETUP_PARAMS=( )
 
 shopt -s extglob
 
 declare arg
 for arg; do
-    SETUP_ARGS[${arg%%=*}]="${arg##*([^=])?(=)}"
+    SETUP_PARAMS[${arg%%=*}]="${arg##*([^=])?(=)}"
 done
 
 if [ "${SETUP_LOGLEVEL:-0}" -gt 0 ]; then
@@ -311,8 +311,8 @@ function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOK
 function Setup.params() {
     local tgt
     for tgt; do
-	[ "${SETUP_ARGS[${tgt#-}]+x}" == x ] && {
-	    if [[ "$tgt" != -* ]]; then printf "%s\n" "${SETUP_ARGS[${tgt#-}]}"; fi
+	[ "${SETUP_PARAMS[${tgt#-}]+x}" == x ] && {
+	    if [[ "$tgt" != -* ]]; then printf "%s\n" "${SETUP_PARAMS[${tgt#-}]}"; fi
 	    return 0
 	}
     done
