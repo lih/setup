@@ -371,13 +371,12 @@ function Setup.use() {
     done
 }
 function Setup.load() {
-    local arg
+    local arg pref="$SETUP_PREFIX"
     for arg; do
         local path="${arg%/*}" file="${arg##*/}"
-        shift
-        local SETUP_PREFIX="$SETUP_PREFIX$path/"
+        local SETUP_PREFIX="$pref$path/"
         pushd "$path" >/dev/null && {
-	    source "$file"
+	    source "$file" --
 	    popd >/dev/null
         }
     done       
