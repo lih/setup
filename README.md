@@ -74,7 +74,7 @@ variables :
 
   - the `Setup.params PARAM...` function prints the value of the first
     PARAM that was specified on the command-line, if it exists. If
-    that PARAM starts with '-', it is not printed out. The function
+    that PARAM starts with `-`, it is not printed out. The function
     exits non-zero if none of the PARAMs were specified on the
     command-line. As such it can be used to define build flags, like
     so :
@@ -102,7 +102,7 @@ variables :
     file from `.setup/lib/MODULE.shl` if it exists, allowing you to
     override some module-specific functions if you need to.
 
-  - the `Setup.load SETUP_FILE PARAM...` function load another Setup
+  - the `Setup.load SETUP_FILE PARAM...` function loads another Setup
     file in the current context, in order to use its preparations as
     dependencies further down the line.
 
