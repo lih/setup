@@ -397,8 +397,9 @@ function prepare() {
     done
     shift
     Setup.addPrefix targets
-    local can="$targets" arg tgt depc=0
+    local can="$targets" 
     if [ "${SETUP_STATE[$can.can]:+x}" == '' ]; then
+	local arg tgt depc=0 nflags=0
 	Setup.setArr "$can.targets" "${targets[@]}"
 	for tgt in "${targets[@]}"; do
             Setup.setVal "$tgt.can" "$can"
@@ -409,21 +410,27 @@ function prepare() {
 	Setup.addPrefix args
 	Setup.setArr "$can.args" "${args[@]}"
 	for arg in "${args[@]}"; do
-            if [[ "$arg" == @* ]]; then
-		arg="${arg%\{*\}}"
-		arg="${arg#@}"
-		Setup.runDependHooks "$arg" || {
-                    local ret="$?"
-                    Setup.log CRIT "  - needed for $can"
-                    return "$ret"
-		}
-		arg="${SETUP_STATE[$arg.can]}"
-		Setup.addArr "$arg.next-defined" "$can"
-		if [ "${SETUP_STATE[$arg.status]}" != 2:done ]; then
-                    ((depc++))
-		fi
-            fi
+	    case "$arg" in
+		-*) ((nflags++));;
+		@*)
+		    arg="${arg%\{*\}}"
+		    arg="${arg#@}"
+		    Setup.runDependHooks "$arg" || {
+			local ret="$?"
+			Setup.log CRIT "  - needed for $can"
+			return "$ret"
+		    }
+		    arg="${SETUP_STATE[$arg.can]}"
+		    Setup.addArr "$arg.next-defined" "$can"
+		    if [ "${SETUP_STATE[$arg.status]}" != 2:done ]; then
+			((depc++))
+		    fi
+		    ;;
+	    esac
 	done
+	if (( nflags == ${#args[@]} )); then
+	    SETUP_SOURCE_FILES+=( "$can" )
+	fi
 	if ((depc > 0)); then
             Setup.setVal "$can.depc" "$depc"
             Setup.setVal "$can.status" 0:defined
