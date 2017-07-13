@@ -30,10 +30,10 @@ where the setup library was already sourced.
 This project provides a Setup file to illustrate its own
 usage. Installing Setup.shl can be done by running
 [bin/setup](bin/setup) and installing the resulting archive (called
-`.dist.tar.gz`) to the root of your filesystem :
+`.pkg.tar.gz`) to the root of your filesystem :
 
     SETUP_INSTALL_DIR="$PWD" bin/setup package
-    sudo tar -xzf .dist.tar.gz -C /
+    sudo tar -xzf .pkg.tar.gz -C /
 
 ### The `prepare` function
 
