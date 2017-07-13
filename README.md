@@ -92,7 +92,8 @@ variables :
         fi
 
     These flag can then be triggered by running the commands `setup
-    install` or `setup target=TARGET`.
+    install` or `setup target=TARGET` (or `setup install
+    target=TARGET` for both).
 
   - the `Setup.use MODULE...` function loads modules from the
     `$SETUP_INSTALL_DIR/lib/setup.d/MODULE.shl` files. It's basically
