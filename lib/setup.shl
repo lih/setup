@@ -21,7 +21,7 @@ shopt -s extglob
 
 declare arg
 for arg; do
-    SETUP_ARGS[${arg%%=*}]="${arg#*=}"
+    SETUP_ARGS[${arg%%=*}]="${arg##*([^=])?(=)}"
 done
 
 if [ "${SETUP_LOGLEVEL:-0}" -gt 0 ]; then
