@@ -3,7 +3,6 @@ declare -g \
 	SETUP_JOBS=8 \
         SETUP_STATE_FILE= \
         SETUP_ROOT="$PWD" \
-	SETUP_NOW="$(date +"%s 10#%N")" \
 	SETUP_PREFIX= \
 	SETUP_TMPDIR="$(mktemp -d)" \
         SETUP_MATCH_HOOKS_N=0
@@ -129,7 +128,6 @@ function Setup.runDependHooks() {
         [ -e "$SETUP_ROOT/$1" ] && {
 	    SETUP_STATE[$1.can]="$1"
 	    SETUP_STATE[$1.status]=2:done
-	    SETUP_STATE[$1.timestamp]="$(date +"%s 10#%N" -r "$SETUP_ROOT/$1")"
 	    SETUP_SOURCE_FILES+=( "$1" )
 	}
     } || {
@@ -185,9 +183,11 @@ function Setup.primeCan() {
             *)  fullargs+=( "$arg" );;
         esac
     done
+
     local -a old_args
     Setup.getArr old_args "$can.full-args"
     old_args=( "${old_args[@]#*:}" )
+
     local sz="${#fullargs[@]}" oldsz="${#old_args[@]}" i
     for ((i=0;i<sz;i++)); do
 	arg="${fullargs[i]}"
@@ -224,15 +224,25 @@ function Setup.primeCan() {
 	Setup.primeCan.unlink "$can" "$i"
 	((i++))
     done
-    
+
     Setup.setVal "$can.argc" "$argc"
     Setup.setVal "$can.status" 1:primed
     Setup.setArr "$can.hidden-args" "${hiddenargs[@]}"
     if ((argc == 0)); then
         SETUP_LEAVES[$can]=1
     fi
+
+    for arg in "${fullargs[@]}"; do
+        if [[ "$arg" != -* ]]; then Setup.need "$arg"; fi
+    done
 }
 
+function Setup.updateSourceStamps() {
+    local src
+    for src in "${SETUP_SOURCE_FILES[@]}"; do
+        unset SETUP_STATE[$src.timestamp]
+    done
+}
 function Setup.isUpToDate() {
     local dst="$1" arg; shift
     for arg; do
@@ -267,41 +277,50 @@ function Setup.runLeaves() {
 function Setup.ts.olderThan() {
     (( $1 < $3 || ($1 == $3 && $2 < $4) ))
 }
+function Setup.ts() { :; }
 function Setup.need() {
     if [ "${SETUP_STATE[$1.needed]}" != true ]; then
 	SETUP_STATE[$1.needed]=true
-	
-	local -a nexts 
-	local next arr edgeType=2:done nextEdgeType
-	for arr in args full-args hidden-args; do
+
+        Setup.runDependHooks "$1"
+
+	local -a nexts arrs
+	local next rawnext arr edgeType=2:done nextEdgeType
+        # If a timestamp is unset, it means that the underlying file
+        # already exists
+        local stamp="${SETUP_STATE[$1.timestamp]:=$(date +"%s 10#%N" -r "$1" 2>/dev/null || echo 0 0)}"
+        case "${SETUP_STATE[$1.status]}" in
+            0:defined) arrs=( args );;
+            *)         arrs=( full-args hidden-args );;
+        esac
+	for arr in "${arrs[@]}"; do
 	    Setup.getArr nexts "$1.$arr"
-	    if [ "$arr" == full-args ]; then nexts=( "${nexts[@]#*:}" ); fi
-	    for next in "${nexts[@]}"; do
-		if [[ "$next" != -* ]]; then
-		    next="${next%\{*\}}"
+	    case "$arr" in
+                full-args) nexts=( "${nexts[@]#*:}" );;
+            esac
+	    for rawnext in "${nexts[@]}"; do
+		if [[ "$rawnext" != -* ]]; then
+		    next="${rawnext%\{*\}}"
 		    next="${next#@}"
 		    Setup.need "$next"
-		    if [[ "${SETUP_STATE[$next.status]}" == 2:done
-			   && "${SETUP_STATE[$1.status]}" == 2:done ]] \
-			       && Setup.ts.olderThan ${SETUP_STATE[$1.timestamp]:-0 0} ${SETUP_STATE[$next.timestamp]:-0 0}; then
-
-			# echo "$1 older than $next" >&2
-			if [[ "$arr" == hidden-args || ( "$arr" == args && "$next" == @* ) ]]; then
+		    if [[ "${SETUP_STATE[$next.status]}" == 2:done ]] \
+			       && Setup.ts.olderThan $stamp ${SETUP_STATE[$next.timestamp]}; then
+                        if [[ "$arr" == hidden-args || ( "$arr" == args && "$rawnext" == @* ) ]]; then
 			    nextEdgeType=0:defined
 			else
 			    nextEdgeType=1:primed
 			fi
-			if [[ "$edgeType" > "$nextEdgeType" ]]; then edgeType="$nextEdgeType"; fi
+                        if [[ "$edgeType" > "$nextEdgeType" ]]; then edgeType="$nextEdgeType"; fi
 		    fi
 		fi
 	    done
 	done
-	if [[ "${SETUP_STATE[$1.status]}" == 2:done && "$edgeType" != 2:done ]]; then
+	if [[ "${SETUP_STATE[$1.status]}" > "$edgeType" ]]; then
 	    SETUP_STATE[$1.status]="$edgeType"
+	    Setup.invalidate "$1"
 	    if [ "$edgeType" == 0:defined ]; then
 		Setup.primeCan "$1"
 	    fi
-	    Setup.invalidate "$1"
 	fi
 	if [[ "${SETUP_STATE[$1.status]}" == 1:primed && "${SETUP_STATE[$1.argc]}" -eq 0 ]]; then
 	    SETUP_LEAVES[$1]=1
@@ -350,13 +369,7 @@ function Setup.state-file() {
 	SETUP_STATE_FILE="$1"
 	if [ -r "$SETUP_STATE_FILE" ]; then
 	    source "$SETUP_STATE_FILE"
-	    local src ts
-	    for src in "${SETUP_SOURCE_FILES[@]}"; do
-		ts="$(date +"%s 10#%N" -r "$src")"
-		if [ "${SETUP_STATE[$src.timestamp]}" != "$ts" ]; then
-		    SETUP_STATE[$src.timestamp]="$ts"
-		fi
-	    done
+            Setup.updateSourceStamps
 	fi
     fi
 }
@@ -415,6 +428,7 @@ function prepare() {
             Setup.setVal "$tgt.can" "$can"
 	done
 	Setup.setVal "$can.cmd" "$1"
+        Setup.setVal "$can.timestamp" "0 0"
 	shift
 	local -a args=( "$@" )
 	Setup.addPrefix args
@@ -436,7 +450,7 @@ function prepare() {
 			((depc++))
 		    fi
 		    ;;
-	    esac
+            esac
 	done
 	if (( nflags == ${#args[@]} )); then
 	    SETUP_SOURCE_FILES+=( "$can" )
@@ -466,6 +480,8 @@ function prepare-match() {
 }
 # Usage: setup file...
 function setup() {
+    local now="$(date +"%s 10#%N")"
+
     local -a workers=( ) SETUP_UPTODATE=( )
     for ((i=0;i<SETUP_JOBS;i++)); do
         (
@@ -504,7 +520,7 @@ function setup() {
         case "$stat" in
 	    0)
 		SETUP_STATE[$can.status]='2:done'
-		SETUP_STATE[$can.timestamp]="$SETUP_NOW"
+		SETUP_STATE[$can.timestamp]="$now"
 		
                 local -a nexts
                 local x depc argc
@@ -523,7 +539,7 @@ function setup() {
 		    SETUP_STATE[$x.argc]=$((argc-1))
 		    if [[ "${SETUP_STATE[$x.needed]}" == true && "$argc" -eq 1 ]]; then
 			SETUP_LEAVES[$x]=1
-		    fi
+                    fi
                 done
 
                 ((nl+=${#SETUP_LEAVES[@]}))
