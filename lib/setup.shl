@@ -5,7 +5,8 @@ declare -g \
         SETUP_ROOT="$PWD" \
 	SETUP_NOW="$(date +"%s 10#%N")" \
 	SETUP_PREFIX= \
-	SETUP_TMPDIR="$(mktemp -d)"
+	SETUP_TMPDIR="$(mktemp -d)" \
+        SETUP_MATCH_HOOKS_N=0
 declare -ga \
 	SETUP_FAILED=( ) \
         SETUP_SOURCE_FILES=( ) \
@@ -170,17 +171,15 @@ function Setup.primeCan() {
 		arg="${arg%\{*\}}"
 		hiddenargs+=( "${arg#@}" )
 		newargs=( $(< "${arg#@}") )
-		case "$argtr" in
-		    '') :;;
-		    \"*\")
-			local -a tmp=( "${newargs[@]}" )
-			local word
-			newargs=( )
-			for word in "${tmp[@]}"; do
-			    eval "newargs+=( $argtr )"
+		if [ -n "$argtr" ]; then
+                    if [[ "$argtr" != \"*\" ]]; then argtr="\$($argtr \"\$word\")"; fi
+                    local -a tmp=( "${newargs[@]}" )
+		    local word
+		    newargs=( )
+		    for word in "${tmp[@]}"; do
+			eval "newargs+=( $argtr )"
 			done
-			;;
-		esac
+		fi
 		Setup.addPrefix newargs
 		fullargs+=( "${newargs[@]}" );;
             *)  fullargs+=( "$arg" );;
@@ -311,6 +310,13 @@ function Setup.need() {
 }
 
 function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
+function Setup.runMatchHook() {
+    local file="$1" regex="$2" cmd="$3"
+    [[ "$file" =~ $regex ]] && {
+        set -- "${BASH_REMATCH[@]:1}"
+        eval "prepare \"\$file\" = $cmd"
+    }
+}
 function Setup.params() {
     local tgt
     for tgt; do
@@ -450,6 +456,14 @@ function prepare() {
 	fi
     fi
     Setup.need "$can"
+}
+function prepare-match() {
+    local -a rest=( "${@:3}" )
+    rest=( "${rest[@]/#/\"}" )
+    rest=( "${rest[@]/%/\"}" )
+    eval "function Setup.matchHook.$SETUP_MATCH_HOOKS_N() { Setup.runMatchHook \"\$1\" '${1//\'/\'\\\'\'}' '${rest[*]//\'/\'\\\'\'}'; }"
+    Setup.hook "Setup.matchHook.$SETUP_MATCH_HOOKS_N"
+    ((SETUP_MATCH_HOOKS_N++))
 }
 # Usage: setup file...
 function setup() {

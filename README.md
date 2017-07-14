@@ -145,22 +145,32 @@ repetition, as in :
     %.o: %.c
          ...
 
-Setup.shl is no exception, even if it doesn't provide nice syntactic sugar
-for those rules. Instead, you can declare your own callbacks to prepare
-files at the last minute. For example, the following code would
-be equivalent to the above rule :
+Setup.shl is no exception. You can declare your own callbacks to
+prepare files whenever they are needed, by using the `Setup.hook`
+function. For example, the following code would be equivalent to the
+above rule :
 
+    Setup.hook C.auto_o
     function C.auto_o() {
         case "$1" in
-            *.o) prepare "$1" = GCC-c "${1/%.o/.c}";;
+            *.o) prepare "$1" = CC "${1/%.o/.c}";;
             *) return 1;;
         esac
     }
-    Setup.hook C.auto_o
 
 It doesn't look as pretty, but it is a much more powerful way to
 describe automatic dependencies, as it allows the full power of Bash
 to be brought forth to take advantage of contextual information.
+
+Although, for simple cases like the above, there is a `prepare-match`
+function that can be used like so :
+
+    prepare-match '^(.*)\.o$' = CC '$1.c' @'$1.includes'
+
+The first parameter is a regex, which is used to match the file name,
+and every parameter after the equal sign can use the regex matches as
+positional parameters (quoted, because they are not in scope when we
+define the rule).
 
 For more example of automatic dependencies, visit the
 [lib/setup.d](lib/setup.d) directory.
@@ -172,8 +182,9 @@ What Setup can do
 ### Splice dependencies for a more expressive build process
 
 The complexities of some build processes are not accurately captured
-by the dependency model of Make-like tools. As an example, consider
-the following example :
+by the dependency model of Make-like tools, specifically
+automatically-generated dependencies. As an example, consider the
+following example :
 
 file: test.c
 
