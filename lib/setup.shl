@@ -310,13 +310,6 @@ function Setup.need() {
 }
 
 function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
-function Setup.runMatchHook() {
-    local file="$1" regex="$2" cmd="$3"
-    [[ "$file" =~ $regex ]] && {
-        set -- "${BASH_REMATCH[@]:1}"
-        eval "prepare \"\$file\" = $cmd"
-    }
-}
 function Setup.params() {
     local tgt
     for tgt; do
@@ -461,7 +454,13 @@ function prepare-match() {
     local -a rest=( "${@:3}" )
     rest=( "${rest[@]/#/\"}" )
     rest=( "${rest[@]/%/\"}" )
-    eval "function Setup.matchHook.$SETUP_MATCH_HOOKS_N() { Setup.runMatchHook \"\$1\" '${1//\'/\'\\\'\'}' '${rest[*]//\'/\'\\\'\'}'; }"
+    eval "function Setup.matchHook.$SETUP_MATCH_HOOKS_N() { 
+    local file=\"\$1\"
+    [[ \"\$file\" =~ $1 ]] && {
+        set -- \"\${BASH_REMATCH[@]:1}\"
+        prepare \"\$file\" = ${rest[*]}
+    }
+}"
     Setup.hook "Setup.matchHook.$SETUP_MATCH_HOOKS_N"
     ((SETUP_MATCH_HOOKS_N++))
 }
