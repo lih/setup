@@ -288,7 +288,7 @@ function Setup.need() {
 	local next rawnext arr edgeType=2:done nextEdgeType
         # If a timestamp is unset, it means that the underlying file
         # already exists
-        local stamp="${SETUP_STATE[$1.timestamp]:=$(date +"%s 10#%N" -r "$1" 2>/dev/null || echo 0 0)}"
+        local stamp="${SETUP_STATE[$1.timestamp]:=$(date +"%s 10#%N" -r "$SETUP_ROOT/$1" || echo 0 0)}"
         case "${SETUP_STATE[$1.status]}" in
             0:defined) arrs=( args );;
             *)         arrs=( full-args hidden-args );;
@@ -315,7 +315,7 @@ function Setup.need() {
 		fi
 	    done
 	done
-	if [[ "${SETUP_STATE[$1.status]}" > "$edgeType" ]]; then
+        if [[ "${SETUP_STATE[$1.status]}" > "$edgeType" ]]; then
 	    SETUP_STATE[$1.status]="$edgeType"
 	    Setup.invalidate "$1"
 	    if [ "$edgeType" == 0:defined ]; then
@@ -562,4 +562,42 @@ function setup() {
     } >/dev/null 2>&1
 
     return "$ret"
+}
+# Usage: reset-sources FILE...
+function reset-sources() {
+    local -a nexts all_nexts
+    local next file
+
+    for file; do
+        Setup.getArr nexts "$file.next-defined"
+        for next in "${nexts[@]}"; do
+            echo "${SETUP_STATE[$next.status]}" >&2
+            if [[ "${SETUP_STATE[$next.status]}" > 0:defined ]]; then
+                SETUP_STATE[$next.status]=0:defined
+                SETUP_STATE[$next.depc]=0
+                Setup.invalidate "$next"
+                all_nexts+=( "$next" )
+            fi
+        done
+
+        Setup.getArr nexts "$file.next-primed"
+        for next in "${nexts[@]#*:}"; do
+            if [[ "${SETUP_STATE[$next.status]}" > 1:primed ]]; then
+                SETUP_STATE[$next.status]=1:primed
+                SETUP_STATE[$next.argc]=0
+                Setup.invalidate "$next"
+                all_nexts+=( "$next" )
+            fi
+        done
+    done
+
+    for next in "${all_nexts[@]}"; do
+        if [[ "${SETUP_STATE[$next.status]}" == 0:defined && "${SETUP_STATE[$next.depc]}" -eq 0 ]]; then
+            Setup.primeCan "$next"
+        elif [[ "${SETUP_STATE[$next.status]}" == 1:primed && "${SETUP_STATE[$next.argc]}" -eq 0 ]]; then
+            SETUP_LEAVES[$next]=1
+        fi
+    done
+
+    setup
 }
