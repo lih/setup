@@ -25,7 +25,9 @@ is to respectively prepare computations and run them.
 There is also a [bin/setup](bin/setup) executable that performs a job
 similar to the `make` tool : it searches a file named `Setup` in the
 current directory or its parents, and runs that file in an environment
-where the setup library was already sourced.
+where the setup library was already sourced. It can also optionally,
+using the `--watch` option, watch all source files and trigger a new
+build every time they are written to.
 
 This project provides a Setup file to illustrate its own
 usage. Installing Setup.shl can be done by running
@@ -61,6 +63,16 @@ it, in addition to the FILEs passed as  arguments.
 
 Like `make`, `setup` uses timestamps to avoid wastefully recompiling
 when a file is already more recent than its dependencies.
+
+### The `reset-sources` function
+
+Usage: **reset-sources FILE...**
+
+This function makes the build system treat the FILEs as though they
+had just been modified, and rebuilds every intermediate file that they
+depend on. It reuses the dependency graph from previous invocations of
+`setup`, making it faster than just running `setup` on a fresh
+environment.
 
 ### Other useful functions and variables
 
@@ -243,13 +255,13 @@ builds a distribution package from those artifacts.
 
 file: C_proj/Setup
 
-    #!/usr/bin/setup
+    #!/usr/bin/setup -f
     Setup.use C
     prepare main = C.ld main.o
 
 file: Setup
 
-    #!/usr/bin/setup
+    #!/usr/bin/setup -f
     Setup.use Pkg
     Setup.load C_proj/Setup
     
