@@ -1,32 +1,104 @@
 #!/bin/bash
-if [ $# -gt 0 ] && [[ "${1##*/}" == [sS]etup* ]]; then
-    script="$(realpath "$1" || echo "$1")"
-    
-    program="${script##*/}"
-    cd "${script%/*}"
-    shift
+eval "set -- $(getopt -o 'hwf:' -l help,watch,setup-file -- "$@")"
+script=
+script_args=( )
+watch_sources=
+show_help=
+while (( $# > 0 )); do
+    opt="$1"; shift
+    case "$opt" in
+        -w|--watch) watch_sources=true;;
+        -f|--setup-file)
+            script="$(realpath "$1" || echo "$1")"
+            program="${script##*/}"
+            shift
+            ;;
+        -h|--help) show_help=true;;
+        *) script_args+=( "$opt" );;
+    esac
+done
+
+if [ "$show_help" ]; then
+    cat <<EOF
+Usage: $0 [-h|--help] [-w|--watch] [-f FILE|--setup-file FILE] [TARGET[=VALUE]]...
+
+Runs a setup operation using Setup.shl (a build library for
+Bash). Returns non-zero if the build failed.
+
+When you specify the --watch option, once the initial build is over,
+source files will be watched for changes using inotifywait, and a
+setup will be triggered each time such a file is written to.
+
+Options:${script:+
+  --script-file $script}${watch_sources:+
+  --watch}
+EOF
 else
-    until [ "$PWD" == / ] || [ -e Setup ]; do cd ..; done
-    if [ -e Setup ]; then
-        program=Setup
+    if [ -z "$script" ]; then
+        until [ "$PWD" == / ] || [ -e Setup ]; do cd ..; done
+        if [ -e Setup ]; then
+            program=Setup
+        else
+            echo "Error: No Setup file found in the current directory or its parents." >&2
+            exit 1
+        fi
     else
-        echo "Error: No Setup file found in the current directory or its parents." >&2
-        exit 1
+        cd "${script%/*}"
+    fi    
+
+    : ${SETUP_INSTALL_DIR:=/usr}
+    source "$SETUP_INSTALL_DIR/lib/setup.shl" "${script_args[@]}"
+
+    function init-setup() {
+        Setup.use base
+        source "$program" --
+        setup
+    }
+    function show-failed() {
+        local red=$'\033[31m'
+        local yellow=$'\033[33m'
+        local def=$'\033[m'
+        local IFS=$'\n'
+        for err in "${SETUP_FAILED[@]}"; do
+            printf "${red}Error[%s]: %s %s${def}\n" "${SETUP_STATE[$err.errno]}" "${SETUP_STATE[$err.cmd]}" "$err"
+            printf "${red}|${yellow} %s${def}\n" $(< "$SETUP_TMPDIR/log/$err.log")
+        done >&2
+        if (( ${#SETUP_FAILED[@]} == 0 )); then :; else return 1; fi
+    }
+
+    if [ "$watch_sources" ]; then
+        declare -A tracked_files=( )
+        mkfifo "$SETUP_TMPDIR/inotify-out"
+        function track-new-files() {
+            local arg
+            for arg in "${SETUP_SOURCE_FILES[@]}"; do
+	        if [ "${tracked_files[$arg]:+x}" == '' ]; then
+	            echo "Watching $arg"
+	            inotifywait -q -m "$arg" > "$SETUP_TMPDIR/inotify-out" &
+	            tracked_files[$arg]="$!"
+	        fi
+            done
+        }
+        function rebuild-saved-files() {
+            while read root ev file; do
+                case ",$ev," in
+	            *,CLOSE_WRITE,*)
+	                echo "$root was updated"
+	                reset-sources "$root"
+	                track-new-files
+                        show-failed
+	                ;;
+                esac
+            done < "$SETUP_TMPDIR/inotify-out"
+        }
+    fi
+
+    init-setup
+    if [ "$watch_sources" ]; then
+        track-new-files 
+        rebuild-saved-files
+        kill "${tracked_files[@]}"
+    else
+        show-failed
     fi
 fi
-: ${SETUP_INSTALL_DIR:=/usr}
-source "$SETUP_INSTALL_DIR/lib/setup.shl"
-Setup.use base
-source "$program" --
-setup
-red=$'\033[31m'
-yellow=$'\033[33m'
-def=$'\033[m'
-for err in "${SETUP_FAILED[@]}"; do
-    printf "${red}Error[%s]: %s %s${def}\n" "${SETUP_STATE[$err.errno]}" "${SETUP_STATE[$err.cmd]}" "$err"
-    IFS=$'\n'
-    printf "${red}|${yellow} %s${def}\n" $(< "$SETUP_TMPDIR/log/$err.log")
-    IFS="$IFSBAK"
-done >&2
-if (( ${#SETUP_FAILED[@]} == 0 )); then :; else exit 1; fi
-
