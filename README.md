@@ -113,7 +113,7 @@ variables :
 
     After loading a module, it also tries to sources a local module
     file from `.setup/lib/MODULE.shl` if it exists, allowing you to
-    override some module-specific functions if you need to.
+    override some module-specific functions on a per-project basis.
 
   - the `Setup.load SETUP_FILE PARAM...` function loads another Setup
     file in the current context, in order to use its preparations as
@@ -123,7 +123,7 @@ variables :
     standalone invocation, such as `install` or `target=X` (see the
     `Setup.params` function for more information), and is made
     available alongside the PARAMs of the current context, overriding
-    them when a conflict arises.
+    them when they already exist.
     
   - the `Setup.hook FUNCTION...` can be used to define new automatic
     dependency generators.
@@ -216,19 +216,26 @@ file: A.h
 
 file: Makefile
 
-    test.o: test.c ???
+    %.o: %.c ???
         gcc -c $< -o $@
 
 In this example, Make offers no simple way for `test.o` to know that
 it depends on `A.h`, or even `test.h` if `test.c` doesn't exist a
-priori. We would like to be able to express the dependency as
-"`test.o` depends on `test.c` and _all the includes of `test.c`_', but
-our tools don't allow us to express that last part.
+priori. We would like to be able to express the dependency as "`%.o`
+depends on `%.c` and _all the includes of `%.c`_', but our tools don't
+allow us to express that last part because the includes of %.c are
+generated, and not known when the Makefile is read.
 
-Using Setup.shl, these dependencies can be simply expressed as : 
+This inability to use the content of generated files within the
+dependency graph leads to a lot of silliness down the line. For
+instance, many compilers/interpreters now offer a `-MM` option, used
+to generate a complete dependency graph in a Makefile format, which
+can then be included by the main Makefile.
 
-    prepare "$file.includes" = Includes "$file.c"
-    prepare "$file.o" = GCC-c "$file.c" @"$file.includes"
+Using Setup.shl, these same dependencies can be simply expressed as : 
+
+    prepare-match '^(.*)\.includes$' = Includes '$1.c'
+    prepare-match '^(.*)\.o$' = CC '$1.c' @'$1.includes'
 
 The `@` in front of the last dependency denotes a *splice dependency*,
 which indicates that, in order to compute `"$file.o"`, we first need
