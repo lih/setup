@@ -69,6 +69,7 @@ else
     if [ "$watch_sources" ]; then
         declare -A tracked_files=( ) inotify_pid=
         mkfifo "$SETUP_TMPDIR/inotify-out"
+        SETUP_ATEXIT_COMMANDS+=( 'if [ -n "$inotify_pid" ]; then kill $inotify_pid; fi' )
         function track-new-files() {
             local arg added=0
             for arg in "${SETUP_SOURCE_FILES[@]}"; do
@@ -102,7 +103,6 @@ else
     if [ "$watch_sources" ]; then
         track-new-files 
         rebuild-saved-files
-        kill "${tracked_files[@]}"
     else
         show-failed
     fi
