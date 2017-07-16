@@ -234,7 +234,12 @@ function Setup.primeCan() {
     fi
 
     for arg in "${fullargs[@]}"; do
-        if [[ "$arg" != -* ]]; then Setup.need "$arg"; fi
+        if [[ "$arg" != -* ]]; then
+            Setup.need "$arg" || {
+                echo "  - needed for $can" >&2
+                return 1               
+            }
+        fi
     done
 }
 
@@ -283,7 +288,7 @@ function Setup.need() {
     if [ "${SETUP_STATE[$1.needed]}" != true ]; then
 	SETUP_STATE[$1.needed]=true
 
-        Setup.runDependHooks "$1"
+        Setup.runDependHooks "$1" || return
 
 	local -a nexts arrs
 	local next rawnext arr edgeType=2:done nextEdgeType
@@ -303,7 +308,10 @@ function Setup.need() {
 		if [[ "$rawnext" != -* ]]; then
 		    next="${rawnext%\{*\}}"
 		    next="${next#@}"
-		    Setup.need "$next"
+		    Setup.need "$next" || {
+                        echo "  - needed for $1" >&2
+                        return 1                        
+                    }
 		    if [[ "${SETUP_STATE[$next.status]}" == 2:done ]] \
 			       && Setup.ts.olderThan $stamp ${SETUP_STATE[$next.timestamp]}; then
                         if [[ "$arr" == hidden-args || ( "$arr" == args && "$rawnext" == @* ) ]]; then
@@ -320,7 +328,7 @@ function Setup.need() {
 	    SETUP_STATE[$1.status]="$edgeType"
 	    Setup.invalidate "$1"
 	    if [ "$edgeType" == 0:defined ]; then
-		Setup.primeCan "$1"
+		Setup.primeCan "$1" || return
 	    fi
 	fi
 	if [[ "${SETUP_STATE[$1.status]}" == 1:primed && "${SETUP_STATE[$1.argc]}" -eq 0 ]]; then
@@ -465,7 +473,7 @@ function prepare() {
             Setup.setVal "$can.depc" "$depc"
             Setup.setVal "$can.status" 0:defined
 	else
-            Setup.primeCan "$can"
+            Setup.primeCan "$can" || return
 	fi
     fi
     Setup.need "$can"
@@ -507,7 +515,7 @@ function setup() {
     local arg sz
     for arg in "${args[@]}"; do
 	Setup.runDependHooks "$arg" || return
-	Setup.need "$arg"
+	Setup.need "$arg" || return
     done
 
     local nl="${#SETUP_LEAVES[@]}" can stat ret=0
@@ -535,7 +543,7 @@ function setup() {
 		    depc="${SETUP_STATE[$x.depc]}"
 		    SETUP_STATE[$x.depc]="$((depc-1))"
 		    if ((depc == 1)); then
-                        Setup.primeCan "$x"
+                        Setup.primeCan "$x" || return
 		    fi
 		done
 

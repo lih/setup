@@ -1,15 +1,16 @@
 Setup.shl: A simple Bash library to replace Makefiles
 =================================================
 
-`make` (and similar dependency-chasing tools) offer very useful
-primitives for building complex file hierarchies from a small set of
-source files, while minimizing the amount of work needed to rebuild
-after a small change.
+`make` (and similar dependency-chasing tools, such as SCons, Rake,
+Waf, Ant, Maven, Gradle et al, which I will refer to as `make`-like
+tools from now on) offer very useful primitives for building complex
+file hierarchies from a small set of source files, while minimizing
+the amount of work needed to rebuild after a small change.
 
-Setup.shl tries to offer the same basic set of features, in a Bash
-environment. It supports parallel compilation, and transitive
-dependencies. Other than that, it tries to be as easy to learn as
-possible.
+Setup.shl tries to offer the same basic set of features, as a (mostly
+pure) Bash library. It supports parallel compilation, and nested
+builds, as well as a new kind of dependency, all in 20kB of Bash
+code. Other than that, it tries to be as easy to use as possible.
 
 Installing and using Setup.shl
 --------------------------
@@ -20,23 +21,24 @@ the root of this project, and sourcing the
 [lib/setup.shl](lib/setup.shl) file (if you are using Bash, that is).
 
 This file defines two functions, `prepare` and `setup` (and a third,
-`teardown`, if you want to perform continuous builds), whose job it is
+`teardown`, if you want to perform continuous builds), whose jobs are
 to respectively prepare computations and run them.
 
-There is also a [bin/setup](bin/setup) executable that performs a job
-similar to the `make` tool : it searches a file named `Setup` in the
-current directory or its parents, and runs that file in an environment
-where the setup library was already sourced. It can also optionally,
-using the `--watch` option, watch all source files and trigger a new
-build every time they are written to.
+This repository also provides a [bin/setup](bin/setup) executable that
+does something similar to the `make` tool : it searches a file named
+`Setup` in the current directory or its parents, and runs that file in
+an environment where the setup library was already sourced. It can
+also optionally, using the `--watch` option,  all source files
+and trigger a new build every time they are written to.
 
 This project provides a Setup file to illustrate its own
 usage. Installing Setup.shl can be done by running
 [bin/setup](bin/setup) and installing the resulting archive (called
-`.pkg.tar.gz`) to the root of your filesystem :
+`.pkg.tar.gz` because I like my generated files to be hidden) to the
+root of your filesystem :
 
-    SETUP_INSTALL_DIR="$PWD" bin/setup package
-    sudo tar -xzf .pkg.tar.gz -C /
+    bin/setup package
+    sudo tar -xvzf .pkg.tar.gz -C /
 
 ### The `prepare` function
 
@@ -277,3 +279,20 @@ file: Setup
 From this setup, any update to a C source file in `C_proj` will be
 detected by the packaging script, and cause the necesary compilation
 steps to be taken before rebuilding the affected packages.
+
+Note the shebang lines at the beginning of both Setups. In cases like
+the above, where the Setup script is called from its project
+directory, the shebangs are not necesary. In fact, they are never
+necesary, but they can be useful if you want to achieve maximum
+comfort when building your project. For example, if you find yourself
+repeatedly needing to run `setup -f PROJDIR/Setup`, you can easily
+make your Setup file executable and create a symbolic link to it
+somewhere in your PATH (in `$HOME/.bin` for instance), like so :
+
+    chmod +x PROJDIR/Setup
+    ln -s PROJDIR/Setup "$HOME/.bin/my-setup" 
+
+Now, you can run a simple `my-setup` (`my-setup install` or `my-setup
+--watch` or anything you would have run with `setup`) to build your
+project. Setup.shl will follow the symlink and anchor the build to its
+rightful directory, as if you had been there all along.

@@ -9,7 +9,15 @@ while (( $# > 0 )); do
     case "$opt" in
         -w|--watch) watch_sources=true;;
         -f|--setup-file)
-            script="$(realpath "$1" || echo "$1")"
+            case "$1" in
+                git://*) script="$HOME/.setup/git-clone/${1//\//\|}"
+                         if [ ! -e "$script" ]; then
+                             mkdir -p "$script"
+                             git clone "$1" "$script"
+                         fi
+                         script+=/Setup;;
+                *)       script="$(realpath "$1" || echo "$1")";;
+            esac
             program="${script##*/}"
             shift
             ;;
@@ -46,7 +54,7 @@ else
         cd "${script%/*}"
     fi    
 
-    : ${SETUP_INSTALL_DIR:=/usr}
+    : ${SETUP_INSTALL_DIR:=${0/%\/*//..}}
     source "$SETUP_INSTALL_DIR/lib/setup.shl" "${script_args[@]}"
 
     function init-setup() {
