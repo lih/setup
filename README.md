@@ -69,10 +69,10 @@ when a file is already more recent than its dependencies.
 Usage: **reset-sources FILE...**
 
 This function makes the build system treat the FILEs as though they
-had just been modified, and rebuilds every intermediate file that they
-depend on. It reuses the dependency graph from previous invocations of
-`setup`, making it faster than just running `setup` on a fresh
-environment.
+had just been modified, and rebuilds every intermediate file that
+depends on them. It reuses the dependency graph from previous
+invocations of `setup`, making it faster than just running `setup` on
+a fresh environment.
 
 ### Other useful functions and variables
 
