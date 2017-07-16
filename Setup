@@ -1,4 +1,4 @@
-#!/usr/bin/setup
+#!/usr/bin/setup -f
 Setup.use Pkg
 
 if Setup.params -package; then
