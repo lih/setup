@@ -357,7 +357,8 @@ function Setup.invalidate() {
     Setup.getArr nexts "$file.next-primed"
     for next in "${nexts[@]#*:}"; do
 	case "${SETUP_STATE[$next.status]}" in
-	    1:primed) (( SETUP_STATE[$next.argc]+=1 ));;
+	    1:primed) (( SETUP_STATE[$next.argc]+=1 ))
+                      unset SETUP_LEAVES[$next];;
 	    2:done) SETUP_STATE[$next.status]=1:primed
 		    SETUP_STATE[$next.argc]=1
 		    Setup.invalidate "$next";;
@@ -478,7 +479,7 @@ function prepare-match() {
     Setup.hook "Setup.matchHook.$SETUP_MATCH_HOOKS_N"
     ((SETUP_MATCH_HOOKS_N++))
 }
-# Usage: setup file...
+# Usage: setup TARGET...
 function setup() {
     local now="$(date +"%s 10#%N")"
 
@@ -563,9 +564,9 @@ function setup() {
 
     return "$ret"
 }
-# Usage: reset-sources FILE...
-function reset-sources() {
-    local -a nexts all_nexts
+# Usage: teardown SOURCE...
+function teardown() {
+    local -a nexts 
     local next file
 
     for file; do
@@ -576,7 +577,6 @@ function reset-sources() {
                 SETUP_STATE[$next.status]=0:defined
                 SETUP_STATE[$next.depc]=0
                 Setup.invalidate "$next"
-                all_nexts+=( "$next" )
             fi
         done
 
@@ -585,19 +585,9 @@ function reset-sources() {
             if [[ "${SETUP_STATE[$next.status]}" > 1:primed ]]; then
                 SETUP_STATE[$next.status]=1:primed
                 SETUP_STATE[$next.argc]=0
+                SETUP_LEAVES[$next]=1
                 Setup.invalidate "$next"
-                all_nexts+=( "$next" )
             fi
         done
     done
-
-    for next in "${all_nexts[@]}"; do
-        if [[ "${SETUP_STATE[$next.status]}" == 0:defined && "${SETUP_STATE[$next.depc]}" -eq 0 ]]; then
-            Setup.primeCan "$next"
-        elif [[ "${SETUP_STATE[$next.status]}" == 1:primed && "${SETUP_STATE[$next.argc]}" -eq 0 ]]; then
-            SETUP_LEAVES[$next]=1
-        fi
-    done
-
-    setup
 }

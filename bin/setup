@@ -67,24 +67,29 @@ else
     }
 
     if [ "$watch_sources" ]; then
-        declare -A tracked_files=( )
+        declare -A tracked_files=( ) inotify_pid=
         mkfifo "$SETUP_TMPDIR/inotify-out"
         function track-new-files() {
-            local arg
+            local arg added=0
             for arg in "${SETUP_SOURCE_FILES[@]}"; do
 	        if [ "${tracked_files[$arg]:+x}" == '' ]; then
-	            echo "Watching $arg"
-	            inotifywait -q -m "$arg" > "$SETUP_TMPDIR/inotify-out" &
-	            tracked_files[$arg]="$!"
+	            echo "Adding $arg to the watch list"
+	            tracked_files[$arg]=1
+                    ((added++))
 	        fi
             done
+            if (( added > 0 )); then
+                if [ -n "$inotify_pid" ]; then kill $inotify_pid; fi
+                inotifywait -q -e close_write,delete_self -m "${!tracked_files[@]}" > "$SETUP_TMPDIR/inotify-out" & inotify_pid="$!"
+            fi
         }
         function rebuild-saved-files() {
             while read root ev file; do
                 case ",$ev," in
-	            *,CLOSE_WRITE,*)
+	            *,CLOSE_WRITE,*|*,DELETE_SELF,*)
 	                echo "$root was updated"
-	                reset-sources "$root"
+	                teardown "$root"
+                        setup
 	                track-new-files
                         show-failed
 	                ;;

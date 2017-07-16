@@ -19,8 +19,9 @@ from your shell by simply setting the `SETUP_INSTALL_DIR` variable to
 the root of this project, and sourcing the
 [lib/setup.shl](lib/setup.shl) file (if you are using Bash, that is).
 
-This file defines two functions, `prepare` and `setup`, whose job it
-is to respectively prepare computations and run them.
+This file defines two functions, `prepare` and `setup` (and a third,
+`teardown`, if you want to perform continuous builds), whose job it is
+to respectively prepare computations and run them.
 
 There is also a [bin/setup](bin/setup) executable that performs a job
 similar to the `make` tool : it searches a file named `Setup` in the
@@ -56,23 +57,22 @@ An argument can take three shapes :
 
 ### The `setup` function
 
-Usage: **setup FILE...**
+Usage: **setup TARGET...**
 
 This function computes all the files that have been prepared before
-it, in addition to the FILEs passed as  arguments. 
+it, in addition to the TARGETs passed as  arguments. 
 
 Like `make`, `setup` uses timestamps to avoid wastefully recompiling
 when a file is already more recent than its dependencies.
 
-### The `reset-sources` function
+### The `teardown` function
 
-Usage: **reset-sources FILE...**
+Usage: **teardown FILE...**
 
 This function makes the build system treat the FILEs as though they
-had just been modified, and rebuilds every intermediate file that
-depends on them. It reuses the dependency graph from previous
-invocations of `setup`, making it faster than just running `setup` on
-a fresh environment.
+had just been modified. Subsequent calls to `setup` will rebuild every
+intermediate target that depends on those FILEs (although the FILEs
+themselves are considered up-to-date and won't be rebuilt).
 
 ### Other useful functions and variables
 
