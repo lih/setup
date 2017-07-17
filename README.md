@@ -20,6 +20,17 @@ from your shell by simply setting the `SETUP_INSTALL_DIR` variable to
 the root of this project, and sourcing the
 [lib/setup.shl](lib/setup.shl) file (if you are using Bash, that is).
 
+Even if it is mostly Bash, the core Setup.shl still needs a few
+utilities to function, which are listed below :
+
+  - `mkfifo` to create the pipes used to communicate with worker
+    subshells
+  - `mktemp` to create a temporary directory used to hold
+    setup-specific state information
+  - `date` to query files for their timestamps and get the system date
+  - GNU `getopt`, only if you are using `bin/setup`, to parse
+    command-line arguments
+
 This file defines two functions, `prepare` and `setup` (and a third,
 `teardown`, if you want to perform continuous builds), whose jobs are
 to respectively prepare computations and run them.
