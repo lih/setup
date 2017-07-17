@@ -221,12 +221,12 @@ file: Makefile
     %.o: %.c ???
         gcc -c $< -o $@
 
-In this example, Make offers no simple way for `test.o` to know that
-it depends on `A.h`, or even `test.h` if `test.c` doesn't exist a
-priori. We would like to be able to express the dependency as "`%.o`
-depends on `%.c` and _all the includes of `%.c`_', but our tools don't
-allow us to express that last part because the includes of %.c are
-generated, and not known when the Makefile is read.
+With generic targets, Make offers no simple way for `test.o` to know
+that it depends on `A.h`, or even `test.h`. We would like to be able
+to express the dependency as "`%.o` depends on `%.c` and _all the
+includes of `%.c`_', but our tools don't allow us to express that last
+part because the includes of %.c are generated, and not known when the
+Makefile is read.
 
 This inability to use the content of generated files within the
 dependency graph leads to a lot of silliness down the line. For
@@ -240,8 +240,8 @@ Using Setup.shl, these same dependencies can be simply expressed as :
     prepare-match '^(.*)\.o$' = CC '$1.c' @'$1.includes'
 
 The `@` in front of the last dependency denotes a *splice dependency*,
-which indicates that, in order to compute `"$file.o"`, we first need
-to compute a list of include names in `"$file.includes"`, then splice
+which indicates that, in order to compute `"$1.o"`, we first need
+to compute a list of include names in `"$1.includes"`, then splice
 that list and use each element as a dependency. 
 
 ### Nested builds
@@ -279,6 +279,8 @@ file: Setup
 From this setup, any update to a C source file in `C_proj` will be
 detected by the packaging script, and cause the necesary compilation
 steps to be taken before rebuilding the affected packages.
+
+### Anchored builds (with Unix-specific shebangs)
 
 Note the shebang lines at the beginning of both Setups. In cases like
 the above, where the Setup script is called from its project
