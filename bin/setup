@@ -10,13 +10,15 @@ while (( $# > 0 )); do
         -w|--watch) watch_sources=true;;
         -f|--setup-file)
             case "$1" in
-                git://*) script="$HOME/.setup/git-clone/${1//\//\|}"
-                         if [ ! -e "$script" ]; then
-                             mkdir -p "$script"
-                             git clone "$1" "$script"
-                         fi
-                         script+=/Setup;;
-                *)       script="$(realpath "$1" || echo "$1")";;
+                git://*|https://*.git)
+                    hash=( $(sha256sum <<< "$1") )
+                    script="$HOME/.setup/git-clone/${1##*/}-$hash"
+                    if [ ! -e "$script" ]; then
+                        mkdir -p "$script"
+                        git clone "$1" "$script"
+                    fi
+                    script+=/Setup;;
+                *)  script="$(realpath "$1" || echo "$1")";;
             esac
             program="${script##*/}"
             shift
