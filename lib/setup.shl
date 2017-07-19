@@ -15,6 +15,7 @@ declare -gA \
 	SETUP_STATE=( ) \
 	SETUP_LEAVES=( ) \
         SETUP_MODULES=( ) \
+        SETUP_LOADED=( ) \
         SETUP_PARAMS=( )
 
 shopt -s extglob
@@ -396,21 +397,25 @@ function Setup.use() {
     done
 }
 function Setup.load() {
-    local pref="$SETUP_PREFIX" path file
+    local path file
 
     local old_params="$(declare -p -A SETUP_PARAMS)"
     declare -A SETUP_PARAMS
 
-    path="${1%/*}"; file="${1##*/}"
+    path="${1/%\/*([^\/])//}"; file="${1#$path}"
     shift
+    if [[ "$path" != /* ]]; then path="/$SETUP_PREFIX$path"; fi
 
-    local SETUP_PREFIX="$pref$path/"
-    eval "SETUP_PARAMS=${old_params#*=}"
-    Setup.setArgs "$@"
-    pushd "$path" >/dev/null && {
-        source "$file" --
-	popd >/dev/null
-    }
+    if [ "${SETUP_LOADED[$path]+x}" == '' ]; then
+        SETUP_LOADED[$path]=1
+        local SETUP_PREFIX="${path#/}"
+        eval "SETUP_PARAMS=${old_params#*=}"
+        Setup.setArgs "$@"
+        pushd "$SETUP_ROOT$path" >/dev/null && {
+            source "$file" --
+	    popd >/dev/null
+        }
+    fi
 }
 
 function Setup.atexit() {

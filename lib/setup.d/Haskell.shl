@@ -194,6 +194,24 @@ function HS.isLocalMod() {
 	HS_MOD_PATH="${modpath%/source/*}"
     }
 }
+
+function HS.source-dir() {
+    shopt -s globstar
+    
+    local src obj srcdir="$2" etcdir="${3:-etc}"
+
+    Setup.use Pkg
+    Pkg.name haskell/"$1"
+    prepare "$HS_PKG/$1/c-sources" = Empty
+    for src in "$srcdir"/**/*.hs; do
+	src="${src#$srcdir/}"
+	prepare "$HS_POOL/$src" = Copy "$srcdir/$src"
+	prepare "$HS_DEP/${src%.*}.pkg-name" = Echo -"$1"
+	prepare "$HS_DEP/${src%.*}.options.file" = Echo -"/${SETUP_PREFIX}$etcdir/options"
+    done
+}
+
+Setup.hook HS.auto_files
 function HS.auto_files() {
     [[ "$1" =~ ^("$HS_PKG"|"$HS_DEP"|"$HS_CONF"|"$HS_POOL"|"$HS_OBJ"|"$HS_BIN")/(.*) ]] && {
 	local root="${BASH_REMATCH[1]}" path="${BASH_REMATCH[2]}"
@@ -298,4 +316,3 @@ function HS.auto_files() {
 	esac
     }    
 }
-Setup.hook HS.auto_files

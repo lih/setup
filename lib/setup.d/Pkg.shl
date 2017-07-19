@@ -4,6 +4,7 @@
 : ${PKG_SRC="${PKG_PREFIX}src"}
 : ${PKG_ETC="${PKG_PREFIX}etc"}
 : ${PKG_DIST=.pkg}
+: ${PKG_VENDOR="${PKG_PREFIX}.vendor"}
 
 function Pkg.incRev() {
     local val="$(< "$1")" 2>/dev/null
@@ -122,7 +123,7 @@ function Pkg.bundle.pacman() {
     prepare "$PKG_BUILD/pacman/$1/package.install" = Pkg.pacman.Installer "$PKG_SRC/$1/etc/installer"
     prepare "$PKG_BUILD/pacman/$1/PKGBUILD" = \
 	    Pkg.pacman.PkgBuild "$PKG_ETC/aliases.pacman" -"$1" \
-	    "$PKG_SRC/$1/etc/"{version,revision,maintainer-name,maintainer-email,description,architecture,dependencies,replaces} \
+	    "$PKG_SRC/$1/etc/"{version,revision,maintainer-name,maintainer-email,synopsis,architecture,dependencies,replaces} \
 	    "$PKG_SRC/$1/$PKG_DIST.tar.gz" \
 	    "$PKG_BUILD/pacman/$1/package.install"
     prepare "$2" = Pkg.pacman.TarXZ "$PKG_SRC/$1/$PKG_DIST.tar.gz" "$PKG_BUILD/pacman/$1/PKGBUILD"
@@ -176,7 +177,7 @@ Architecture: ${archs[$arch]}
 Maintainer: $maintainer <$email>
 ${depends:+Depends: $depends"
 "}${replaces:+Replaces: $replaces"
-"}Description: $description
+"}Description: $(IFS=$'\n'; printf " %s\n" $description)
 EOF
 }
 function Pkg.deb.Installer() {
@@ -235,6 +236,8 @@ function Pkg.bundle.deb() {
 	    Pkg.deb.DpkgBuild "$PKG_SRC/$1/$PKG_DIST.tar.gz" "$PKG_BUILD/deb/$1/root/DEBIAN/"{control,postinst,prerm} \
 	    
 }
+
+Setup.hook Pkg.auto-files
 function Pkg.auto-files() {
     {
 	[[ "$1" =~ ^("$PKG_BUILD")/([^/]*)/([^/]*)/(.*) ]] && {
@@ -245,7 +248,7 @@ function Pkg.auto-files() {
 	    esac
 	}
     } || {
-	[[ "$1" =~ ^"$PKG_SRC"/([^/]*)/etc/(version|revision|maintainer(-name|-email)|description|architecture|dependencies|replaces|installer) ]] && {
+	[[ "$1" =~ ^"$PKG_SRC"/([^/]*)/etc/(version|revision|maintainer(-name|-email)|description|synopsis|architecture|dependencies|replaces|installer) ]] && {
 	    case "${BASH_REMATCH[2]}" in
 		revision) prepare "$1" = Pkg.incRev "$PKG_SRC/${BASH_REMATCH[1]}/$PKG_DIST.tar.gz";;
 		*)        prepare "$1" = Empty;;
@@ -253,7 +256,6 @@ function Pkg.auto-files() {
 	}
     } 
 }
-Setup.hook Pkg.auto-files
 
 function Pkg.package() {
     local -a PKG_FILES=( )
@@ -298,3 +300,24 @@ function Pkg.files() {
 }
 
 function Pkg.PO2MO() { mkpdir "$1" ; msgfmt "$2" -o "$1" ; }
+
+declare -gA PKG_SUB_PREFIX=( ) 
+
+function Pkg.name() {
+    PKG_SUB_PREFIX[$1]="${2:-/$SETUP_PREFIX}"
+}
+function Pkg.depends() {
+    local arg name url pref
+    for arg; do
+        name="${arg%%=*}"
+        url="${arg#*=}"
+        pref="${PKG_SUB_PREFIX[$name]:-$PKG_VENDOR/$name/}"
+        if [ ! -e "$SETUP_ROOT${pref}Setup" ]; then
+            case "$url" in
+                git://*|https://*.git)
+                    git clone "$url" "$SETUP_ROOT$pref";;
+            esac
+        fi
+        Setup.load "${pref}Setup"
+    done
+}
