@@ -497,6 +497,7 @@ function Setup.atexit() {
         ) &
     fi
     rm -rf "$SETUP_TMPDIR"
+    kill "${SETUP_DATE_COPROC[2]}"
     local hook
     for hook in "${SETUP_ATEXIT_COMMANDS[@]}"; do
         eval "$hook"
