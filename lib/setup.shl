@@ -403,6 +403,69 @@ function Setup.need() {
 	fi
     fi	
 }
+function Setup.isCycleFree.from() {
+    if [ "${has_cycle[$1]+x}" == '' ]; then
+        local next cycle=0
+        local -a nexts=( ) tmp
+        if [ "${visited[$1]+x}" == x ]; then
+            cycle=1
+        else
+            visited[$1]="$depth"
+            case "${SETUP_STATE[$1.status]}" in
+                0:defined)
+                    Setup.getArr tmp "$1.args"
+                    for next in "${tmp[@]}"; do
+                        if [[ "$next" == @* ]]; then
+                            next="${next%\{*\}}"
+                            nexts+=( "${next#@}" )
+                        fi
+                    done
+                    ;;
+                1:primed)
+                    Setup.getArr tmp "$1.full-args"
+                    for next in "${tmp[@]#*:}"; do
+                        if [[ "$next" != -* ]]; then
+                            nexts+=( "$next" )
+                        fi
+                    done
+                ;;
+            esac
+            for next in "${nexts[@]}"; do
+                depth=$((depth+1)) Setup.isCycleFree.from "$next" || cycle=1                
+            done
+            if (( cycle == 1 )); then
+               cycle_nodes[1000-depth]="$1" 
+            fi
+            unset "visited[$1]"
+        fi
+        has_cycle[$1]="$cycle"
+        return "$cycle"
+    else
+        return "${has_cycle[$1]}"
+    fi
+}
+function Setup.isCycleFree() {
+    local -A visited=( ) has_cycle=( )
+    local -a cycle_nodes=( )
+    local node depth=0
+    for node in "${!SETUP_STATE[@]}"; do
+        if [[ "$node" == *.status ]]; then
+            node="${node%.status}"
+            if [[ "${SETUP_STATE[$node.status]}" != 2:done && "${SETUP_STATE[$node.needed]}" == true ]]; then
+                Setup.isCycleFree.from "$node" || {
+                    Setup.log CRIT "Dependency cycle detected at node $node"
+                    local prev="$node"
+                    for node in "${cycle_nodes[@]}"; do
+                        Setup.log CRIT "  - $prev depends on $node"
+                        prev="$node"
+                    done
+                    
+                    return 1
+                }
+            fi
+        fi
+    done
+}
 
 function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
 function Setup.params() {

@@ -114,6 +114,6 @@ else
         track-new-files 
         rebuild-saved-files
     else
-        show-failed
+        show-failed && Setup.isCycleFree
     fi
 fi
