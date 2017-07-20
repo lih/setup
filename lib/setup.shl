@@ -10,7 +10,8 @@ declare -ga \
 	SETUP_FAILED=( ) \
         SETUP_SOURCE_FILES=( ) \
         SETUP_AUTO_DEPEND_HOOKS=( ) \
-        SETUP_ATEXIT_COMMANDS=( )
+        SETUP_ATEXIT_COMMANDS=( ) \
+        SETUP_DATE_COPROC=( )
 declare -gA \
 	SETUP_STATE=( ) \
 	SETUP_LEAVES=( ) \
@@ -37,6 +38,61 @@ function Setup.log.CRIT() { printf "[CRIT:${BASHPID:-$$}]: %s\n" "$*" >&2; }
 
 function Setup.log() { Setup.log."$1" "${@:2}"; }
 function Setup.trace() { Setup.log INFO "$@" >&2; "$@"; }
+
+function Setup.startDateCoproc() {
+    mkfifo "$SETUP_TMPDIR"/{date-in,date-out}
+    local xin xout
+    exec {xin}<>"$SETUP_TMPDIR/date-out" {xout}<>"$SETUP_TMPDIR/date-in"
+
+    if [ -x /usr/bin/cc ]; then
+        # Calling an external "date" process to get each file's
+        # timestamp is not efficient.
+
+        # Instead, we run a small specialized C program to do print a
+        # timestamp for each file in its input stream, which is much faster
+        # as it doesn't involve spawning a new process each time
+        cat > "$SETUP_TMPDIR/date.c" <<EOF
+#include <sys/stat.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char* argv[]) {
+  struct stat st;
+  char *line = malloc(4096);
+  size_t linesz = 4096;
+  ssize_t len;
+  
+  setbuf(stdout,NULL);
+
+  while(1) {
+    len = getline(&line,&linesz,stdin);
+    if(len == -1) return 0;
+    line[len-1]='\0';
+    if(stat(line,&st) == 0) {
+      printf("%ld %ld\n",st.st_mtime,st.st_mtim.tv_nsec);
+    } else {
+      printf("0 0\n");
+    }
+  } 
+  return 0;
+} 
+EOF
+        /usr/bin/cc "$SETUP_TMPDIR/date.c" -o "$SETUP_TMPDIR/date"
+        "$SETUP_TMPDIR/date"
+    else
+        while read file; do
+            date -r "$file" +"%s 10#%N"
+        done
+    fi <&"$xin" >&"$xout" &
+    local pid="$!"
+    
+    SETUP_DATE_COPROC=( "$xout" "$xin" "$pid" )
+}
+Setup.startDateCoproc
+function Setup.getDate() {
+    printf "%s\n" "$1" >&"${SETUP_DATE_COPROC[1]}"
+    read -u "${SETUP_DATE_COPROC[0]}" "$2"
+}
 
 function Setup.send() {
     (
@@ -245,9 +301,14 @@ function Setup.primeCan() {
 }
 
 function Setup.updateSourceStamps() {
-    local src
+    local src stamp
     for src in "${SETUP_SOURCE_FILES[@]}"; do
-        unset SETUP_STATE[$src.timestamp]
+        Setup.getDate "$src" stamp
+        if [[ "${SETUP_STATE[$src.needed]}" == true ]] \
+               && Setup.ts.olderThan ${SETUP_STATE[$src.timestamp]:-0 0} $stamp; then
+            teardown "$src"
+        fi
+        SETUP_STATE[$src.timestamp]="$stamp"
     done
 }
 function Setup.isUpToDate() {
@@ -295,7 +356,11 @@ function Setup.need() {
 	local next rawnext arr edgeType=2:done nextEdgeType
         # If a timestamp is unset, it means that the underlying file
         # already exists
-        local stamp="${SETUP_STATE[$1.timestamp]:=$(date +"%s 10#%N" -r "$SETUP_ROOT/$1" || echo 0 0)}"
+        local stamp="${SETUP_STATE[$1.timestamp]}"
+        if [ -z "$stamp" ]; then
+            Setup.getDate "$SETUP_ROOT/$1" stamp
+            SETUP_STATE[$1.timestamp]="$stamp"
+        fi
         case "${SETUP_STATE[$1.status]}" in
             0:defined) arrs=( args );;
             *)         arrs=( full-args hidden-args );;
@@ -380,6 +445,8 @@ function Setup.state-file() {
 	SETUP_STATE_FILE="$1"
 	if [ -r "$SETUP_STATE_FILE" ]; then
 	    source "$SETUP_STATE_FILE"
+            local -a hash=( $(sha256sum <<< "${!SETUP_PARAMS[@]}") )
+            if [ -r "$SETUP_STATE_FILE.$hash" ]; then source "$SETUP_STATE_FILE.$hash"; fi
             Setup.updateSourceStamps
 	fi
     fi
@@ -420,7 +487,14 @@ function Setup.load() {
 
 function Setup.atexit() {
     if [ -n "$SETUP_STATE_FILE" ]; then
-	Setup.dumpState >"$SETUP_STATE_FILE"
+	Setup.dumpState >"$SETUP_STATE_FILE" &
+        (
+            for i in "${!SETUP_STATE[@]}"; do
+                if [[ "$i" != *.needed ]]; then unset "SETUP_STATE[$i]"; fi
+            done
+            hash=( $(sha256sum <<< "${!SETUP_PARAMS[@]}") )
+            declare -p SETUP_STATE | sed -r 's/^declare[^=]*=/SETUP_STATE+=/' >"$SETUP_STATE_FILE.$hash"
+        ) &
     fi
     rm -rf "$SETUP_TMPDIR"
     local hook
@@ -590,7 +664,6 @@ function teardown() {
     for file; do
         Setup.getArr nexts "$file.next-defined"
         for next in "${nexts[@]}"; do
-            echo "${SETUP_STATE[$next.status]}" >&2
             if [[ "${SETUP_STATE[$next.status]}" > 0:defined ]]; then
                 SETUP_STATE[$next.status]=0:defined
                 SETUP_STATE[$next.depc]=0
