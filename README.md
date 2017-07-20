@@ -338,3 +338,19 @@ Now, you can run a simple `my-setup` (`my-setup install` or `my-setup
 --watch` or anything you would have run with `setup`) to build your
 project. Setup.shl will follow the symlink and anchor the build to its
 rightful directory, as if you had been there all along.
+
+### Continuous builds 
+
+Even though it is fairly fast Bash code, and can remember dependency
+information from one build to the next with `Setup.state-file`,
+Setup.shl can still take up to a few seconds on large projects to scan
+all of its dependency graph for updates (depending mostly on the speed
+of your hard drive).
+
+To avoid reloading the whole dependency graph every time a source file
+is modified, you can watch the filesystem for changes (using inotify
+on Linux and FSEvents on MacOS, for example), and `teardown` files as
+they are modified, while reusing the graph from a previous session.
+
+For an example usage of this feature, see the `rebuild-saved-files`
+function in [bin/setup](bin/setup).
