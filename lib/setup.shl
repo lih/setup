@@ -15,6 +15,7 @@ declare -ga \
 declare -gA \
 	SETUP_STATE=( ) \
 	SETUP_LEAVES=( ) \
+	SETUP_UNNEEDED_LEAVES=( ) \
         SETUP_MODULES=( ) \
         SETUP_LOADED=( ) \
         SETUP_PARAMS=( )
@@ -446,7 +447,15 @@ function Setup.state-file() {
 	if [ -r "$SETUP_STATE_FILE" ]; then
 	    source "$SETUP_STATE_FILE"
             local -a hash=( $(sha256sum <<< "${!SETUP_PARAMS[@]}") )
-            if [ -r "$SETUP_STATE_FILE.$hash" ]; then source "$SETUP_STATE_FILE.$hash"; fi
+            if [ -r "$SETUP_STATE_FILE.$hash" ]; then
+                source "$SETUP_STATE_FILE.$hash"
+                local leaf
+                for leaf in "${!SETUP_LEAVES[@]}"; do
+                    if [ "${SETUP_STATE[$leaf.needed]}" != true ]; then
+                        unset "SETUP_LEAVES[$leaf]"
+                    fi
+                done
+            fi
             Setup.updateSourceStamps
 	fi
     fi
@@ -493,7 +502,9 @@ function Setup.atexit() {
                 if [[ "$i" != *.needed ]]; then unset "SETUP_STATE[$i]"; fi
             done
             hash=( $(sha256sum <<< "${!SETUP_PARAMS[@]}") )
-            declare -p SETUP_STATE | sed -r 's/^declare[^=]*=/SETUP_STATE+=/' >"$SETUP_STATE_FILE.$hash"
+            declare -p SETUP_STATE SETUP_UNNEEDED_LEAVES \
+                | sed -r 's/^declare[^=]*\s([^ =]+)=/\1+=/;s/^SETUP_UNNEEDED/SETUP/' \
+                      >"$SETUP_STATE_FILE.$hash"
         ) &
     fi
     rm -rf "$SETUP_TMPDIR"
@@ -631,8 +642,12 @@ function setup() {
                 for x in "${nexts[@]#*:}"; do
 		    argc="${SETUP_STATE[$x.argc]}"
 		    SETUP_STATE[$x.argc]=$((argc-1))
-		    if [[ "${SETUP_STATE[$x.needed]}" == true && "$argc" -eq 1 ]]; then
-			SETUP_LEAVES[$x]=1
+		    if ((argc == 1)); then
+                        if [ "${SETUP_STATE[$x.needed]}" == true ]; then
+			    SETUP_LEAVES[$x]=1
+                        else
+                            SETUP_UNNEEDED_LEAVES[$x]=1
+                        fi
                     fi
                 done
 
