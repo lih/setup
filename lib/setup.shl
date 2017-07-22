@@ -639,7 +639,7 @@ function prepare-match() {
     rest=( "${rest[@]/%/\"}" )
     eval "function Setup.matchHook.$SETUP_MATCH_HOOKS_N() { 
     local file=\"\$1\"
-    [[ \"\$file\" =~ $1 ]] && {
+    [[ \"\$file\" =~ ^/$1$ ]] && {
         set -- \"\${BASH_REMATCH[@]:1}\"
         prepare \"\$file\" = ${rest[*]}
     }

@@ -190,7 +190,7 @@ to be brought forth to take advantage of contextual information.
 Although, for simple cases like the above, there is a `prepare-match`
 function that can be used like so :
 
-    prepare-match '^(.*)\.o$' = CC '$1.c' @'$1.includes'
+    prepare-match '(.*)\.o' = CC '$1.c' @'$1.includes'
 
 The first parameter is a regex, which is used to match the file name,
 and every parameter after the equal sign can use the regex matches as
@@ -247,8 +247,8 @@ can then be included by the main Makefile.
 
 Using Setup.shl, these same dependencies can be simply expressed as : 
 
-    prepare-match '^(.*)\.includes$' = Includes '$1.c'
-    prepare-match '^(.*)\.o$' = CC '$1.c' @'$1.includes'
+    prepare-match '(.*)\.includes' = Includes '$1.c'
+    prepare-match '(.*)\.o' = CC '$1.c' @'$1.includes'
 
 The `@` in front of the last dependency denotes a *splice dependency*,
 which indicates that, in order to compute `"$1.o"`, we first need
@@ -261,10 +261,10 @@ if we only had a naive implementation that only scans the source file
 (using `sed`, for example), Setup.shl would be able to infer the
 correct build dependencies, by adding a third rule :
 
-    prepare-match '^(.*)\.includes$' = Includes '$1'
-    prepare-match '^(.*)\.all-includes$' = \
+    prepare-match '(.*)\.includes' = Includes '$1'
+    prepare-match '(.*)\.all-includes' = \
       Concat '$1.includes' @'$1.includes{\"\$word.all-includes\"}'
-    prepare-match '^(.*)\.o$' = CC '$1.c' @'$1.c.all-includes'
+    prepare-match '(.*)\.o' = CC '$1.c' @'$1.c.all-includes'
 
 The expression in braces is a transformation that is applied to each
 `$word` of the include list to generate the dependency name. In this
