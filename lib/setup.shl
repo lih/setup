@@ -3,6 +3,7 @@ declare -g \
 	SETUP_JOBS=8 \
         SETUP_STATE_FILE= \
         SETUP_ROOT="$PWD" \
+	SETUP_CMDSIZE=0 \
 	SETUP_PREFIX= \
 	SETUP_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/setup.XXXXXXXX")" \
         SETUP_MATCH_HOOKS_N=0
@@ -126,7 +127,7 @@ Setup.mkqueue SETUP_MASTER master
 function Setup.dumpState() {
     {
 	for k in "${!SETUP_STATE[@]}"; do if [[ "$k" == *.needed ]]; then unset SETUP_STATE[$k]; fi; done
-	declare -p SETUP_STATE SETUP_SOURCE_FILES SETUP_UNNEEDED_LEAVES
+	declare -p SETUP_STATE SETUP_SOURCE_FILES SETUP_UNNEEDED_LEAVES SETUP_CMDSIZE
     } | sed 's/^declare/declare -g/'
 }
 function Setup.addArr() {
@@ -339,7 +340,7 @@ function Setup.runLeaves() {
             cmd=( "${cmd[@]//\'/\'\\\'\'}" )
             cmd=( "${cmd[@]/%/\'}" )
             cmd=( "${cmd[@]/#/\'}" )
-            Setup.send $SETUP_WORKER "$leaf ${cmd[*]}" '%-20s %s\n' "${SETUP_STATE[$leaf.cmd]}" "${dst[*]}"
+            Setup.trace Setup.send $SETUP_WORKER "$leaf ${cmd[*]}" "%-${SETUP_CMDSIZE}s %s\n" "${SETUP_STATE[$leaf.cmd]}" "${dst[*]}"
         fi
     done
     SETUP_LEAVES=( )
@@ -509,7 +510,13 @@ function Setup.state-file() {
     if [ -z "$SETUP_STATE_FILE" ]; then
 	SETUP_STATE_FILE="$1"
 	if [ -r "$SETUP_STATE_FILE" ]; then
+	    local old_cmdsize="$SETUP_CMDSIZE"
 	    source "$SETUP_STATE_FILE"
+
+	    if (( old_cmdsize > SETUP_CMDSIZE )); then
+		SETUP_CMDSIZE="$old_cmdsize"
+	    fi
+	    
             local -a hash=( $(sha256sum <<< "${!SETUP_PARAMS[@]}") )
             if [ -r "$SETUP_STATE_FILE.$hash" ]; then
                 source "$SETUP_STATE_FILE.$hash"
@@ -521,7 +528,8 @@ function Setup.state-file() {
                     fi
                 done
             fi
-            Setup.updateSourceStamps
+
+	    Setup.updateSourceStamps
 	fi
     fi
 }
@@ -597,6 +605,9 @@ function prepare() {
             Setup.setVal "$tgt.can" "$can"
 	done
 	Setup.setVal "$can.cmd" "$1"
+	if (( SETUP_CMDSIZE < ${#1} )); then
+	    SETUP_CMDSIZE=${#1}
+	fi
         Setup.setVal "$can.timestamp" "0 0"
 	shift
 	local -a args=( "$@" )
