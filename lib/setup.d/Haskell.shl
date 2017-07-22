@@ -109,7 +109,7 @@ function HS.cc() {
 }
 function HS.depends() {
     mkpdir "$1"
-    sed -rn 's/^import(\s+qualified)?\s+([A-Z][A-Za-z0-9_.]*).*$/\2/p' "$2" | grep -vxf "$3" > "$1" || :
+    sed -rn '/\{-/{:loop;/-\}/!{N;bloop}};s/\{-.*-\}//;s/^import(\s+qualified)?\s+([A-Z][A-Za-z0-9_.]*).*$/\2/p' "$2" | grep -vxf "$3" > "$1" || :
 }
 function HS.get() {
     local name="$(< "$3")"

@@ -4,7 +4,7 @@ declare -g \
         SETUP_STATE_FILE= \
         SETUP_ROOT="$PWD" \
 	SETUP_PREFIX= \
-	SETUP_TMPDIR="$(mktemp -d)" \
+	SETUP_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/setup.XXXXXXXX")" \
         SETUP_MATCH_HOOKS_N=0
 declare -ga \
 	SETUP_FAILED=( ) \
@@ -49,9 +49,10 @@ function Setup.startDateCoproc() {
         # Calling an external "date" process to get each file's
         # timestamp is not efficient.
 
-        # Instead, we run a small specialized C program to do print a
-        # timestamp for each file in its input stream, which is much faster
-        # as it doesn't involve spawning a new process each time
+        # Instead, we run a small specialized C program to print a
+        # timestamp for each file in its input stream, which is much
+        # faster as it doesn't involve spawning a new process each
+        # time
         cat > "$SETUP_TMPDIR/date.c" <<EOF
 #include <sys/stat.h>
 #include <stdio.h>
@@ -78,8 +79,8 @@ int main(int argc, char* argv[]) {
   return 0;
 } 
 EOF
-        /usr/bin/cc "$SETUP_TMPDIR/date.c" -o "$SETUP_TMPDIR/date"
-        "$SETUP_TMPDIR/date"
+        /usr/bin/cc "$SETUP_TMPDIR/date.c" -o "$SETUP_TMPDIR/date" 2>/dev/null
+	[ -x "$SETUP_TMPDIR/date" ] && "$SETUP_TMPDIR/date"
     else
         while read file; do
             date -r "$file" +"%s 10#%N"
@@ -687,9 +688,6 @@ function setup() {
         ((nl--))
         case "$stat" in
 	    0)
-		SETUP_STATE[$can.status]='2:done'
-		SETUP_STATE[$can.timestamp]="$now"
-		
                 local -a nexts
                 local x depc argc
                 Setup.getArr nexts "$can.next-defined"
@@ -714,6 +712,8 @@ function setup() {
                     fi
                 done
 
+		SETUP_STATE[$can.status]='2:done'
+		SETUP_STATE[$can.timestamp]="$now"
                 ((nl+=${#SETUP_LEAVES[@]}))
                 Setup.runLeaves
                 ;;
