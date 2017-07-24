@@ -1,6 +1,8 @@
 Setup.shl: A simple Bash library to replace Makefiles
 =================================================
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 `make` (and similar dependency-chasing tools, such as SCons, Rake,
 Waf, Ant, Maven, Gradle et al, which I will refer to as `make`-like
 tools from now on) offer very useful primitives for building complex
