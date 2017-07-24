@@ -7,6 +7,8 @@ Setup.shl: A simple Bash library to replace Makefiles
 ![Depend](https://img.shields.io/badge/dependency-date-lightgrey.svg)
 ![Depend](https://img.shields.io/badge/dependency-mkfifo-lightgrey.svg)
 
+![demo](https://github.com/lih/misc-resources/raw/master/setup-demo.gif)
+
 `make` (and similar dependency-chasing tools, such as SCons, Rake,
 Waf, Ant, Maven, Gradle et al, which I will refer to as `make`-like
 tools from now on) offer very useful primitives for building complex
