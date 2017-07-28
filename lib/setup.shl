@@ -227,7 +227,7 @@ function Setup.primeCan() {
 	    @*)      argtr= ;;&
 	    @*\{*\}) argtr="${arg#*\{}"; argtr="${argtr%\}}" ;&
             @*)
-		arg="${arg%\{*\}}"
+		arg="${arg%%\{*\}}"
 		hiddenargs+=( "${arg#@}" )
 		newargs=( $(< "${arg#@}") )
 		if [ -n "$argtr" ]; then
@@ -375,7 +375,7 @@ function Setup.need() {
             esac
 	    for rawnext in "${nexts[@]}"; do
 		if [[ "$rawnext" != -* ]]; then
-		    next="${rawnext%\{*\}}"
+		    next="${rawnext%%\{*\}}"
 		    next="${next#@}"
 		    Setup.need "$next" || {
                         echo "  - needed for $1" >&2
@@ -418,7 +418,7 @@ function Setup.isCycleFree.from() {
                     Setup.getArr tmp "$1.args"
                     for next in "${tmp[@]}"; do
                         if [[ "$next" == @* ]]; then
-                            next="${next%\{*\}}"
+                            next="${next%%\{*\}}"
                             nexts+=( "${next#@}" )
                         fi
                     done
@@ -617,7 +617,7 @@ function prepare() {
 	    case "$arg" in
 		-*) ((nflags++));;
 		@*)
-		    arg="${arg%\{*\}}"
+		    arg="${arg%%\{*\}}"
 		    arg="${arg#@}"
 		    Setup.runDependHooks "$arg" || {
 			local ret="$?"
