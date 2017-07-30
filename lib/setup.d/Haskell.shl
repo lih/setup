@@ -1,4 +1,6 @@
 #!/bin/bash
+Setup.provide Haskell 1.0
+
 : ${HS_PREFIX=/${SETUP_PREFIX}}
 
 : ${HS_BUILD=${HS_PREFIX}.build}

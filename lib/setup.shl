@@ -573,16 +573,14 @@ function Setup.use() {
 	minver="${minver%:*}"
 	mod="${mod%%:*}"
 	if [ "${SETUP_MODULES[$mod]:+x}" == '' ]; then
-	    if [ ! -e "Setup.d/$mod.shl" ]; then
-		if [ -e "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" ]; then
-		    mkdir -p Setup.d
-		    cp "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" "Setup.d/$mod.shl"
-		else
-		    Setup.log CRIT "Error: could not locate a module source for '$mod'"
-		    exit 1
-		fi
+	    if [ -e "Setup.d/$mod.shl" ]; then
+		source "Setup.d/$mod.shl"
+	    elif [ -e "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" ]; then
+		source "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" "Setup.d/$mod.shl"
+	    else
+		Setup.log CRIT "Error: could not locate a module source for '$mod'"
+		exit 1
 	    fi
-	    source "Setup.d/$mod.shl"
 	fi
 	local ret
 	if { [ -n "$minver" ] && { Setup.use.cmpVer "${SETUP_MODULES[$mod]}" "$minver"; (($? == 1)); } \

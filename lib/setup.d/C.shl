@@ -1,4 +1,6 @@
 #!/bin/bash
+Setup.provide C 0.1
+
 : ${C_PREFIX="/$SETUP_PREFIX"}
 : ${C_BUILD="${C_PREFIX}.build"}
 : ${C_SRC="${C_PREFIX}src"}
@@ -10,15 +12,4 @@ function C.compile() { gcc -c "$2" ${C_SRC:+-I"$C_SRC"} -o "$1"; }
 function C.ld() { gcc -o "$1" "${@:2}"; }
 function C.includes() { sed 's,#include "(.*)",'"${C_SRC:+$C_SRC/}"'\1,p' -rn "$2" > "$1"; }
 
-Setup.hook C.auto-files
-function C.auto-files() {
-    {
-	[[ "$1" =~ ^("$C_OBJ"|"$C_DEP")/(.*)\.(o|includes)$ ]] && {
-	    local ext="${BASH_REMATCH[2]}" path="${BASH_REMATCH[1]}"
-	    case "$ext" in
-		o)        prepare "$1" = C.compile "$C_SRC/$path.c" @"$C_DEP/$path.includes";;
-		includes) prepare "$1" = C.includes "$C_SRC/$path.c";;
-	    esac
-	}
-    }
-}
+prepare-match "$"

@@ -1,4 +1,6 @@
 #!/bin/bash
+Setup.provide Pkg 0.1
+
 : ${PKG_PREFIX="/$SETUP_PREFIX"}
 : ${PKG_BUILD="${PKG_PREFIX}.build"}
 : ${PKG_SRC="${PKG_PREFIX}src"}
@@ -257,6 +259,7 @@ function Pkg.auto-files() {
     } 
 }
 
+# Usage: Pkg.package ...
 function Pkg.package() {
     local -a PKG_FILES=( )
     "$@"
@@ -265,6 +268,7 @@ function Pkg.package() {
 	prepare .autocommit = Git.autocommit "$PKG_DIST.tar.gz"
     fi
 }
+# Usage: Pkg.package ... Pkg.man-pages "PAGE_1 .. PAGE_N" ...
 function Pkg.man-pages() {
     local page file
     for page in $1; do
@@ -275,6 +279,7 @@ function Pkg.man-pages() {
     done
     "${@:2}"
 }
+# Usage: Pkg.package ... Pkg.po-files DIR "FILE_1.po ... FILE_N.po" ...
 function Pkg.po-files() {
     local dir="$1" po locale file
     local -a pos=( $2 )
@@ -286,6 +291,7 @@ function Pkg.po-files() {
     done
     "${@:3}"
 }
+# Usage: Pkg.package ... Pkg.files (PATH=FILE)...
 function Pkg.files() {
     local -a files=(  )
     local file src dst
@@ -303,9 +309,11 @@ function Pkg.PO2MO() { mkpdir "$1" ; msgfmt "$2" -o "$1" ; }
 
 declare -gA PKG_SUB_PREFIX=( ) 
 
+# Usage: Pkg.name PACKAGE [SOURCE_PREFIX]
 function Pkg.name() {
     PKG_SUB_PREFIX[$1]="${2:-/$SETUP_PREFIX}"
 }
+# Usage: Pkg.depends (PACKAGE=URL)...
 function Pkg.depends() {
     local arg name url pref
     for arg; do

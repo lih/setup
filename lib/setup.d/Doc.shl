@@ -1,4 +1,6 @@
 #!/bin/bash
+Setup.provide Doc 0.1
+
 : ${DOC_PREFIX="/$SETUP_PREFIX"}
 : ${DOC_BUILD="${DOC_PREFIX}.build"}
 : ${DOC_SRC="${DOC_PREFIX}src"}
