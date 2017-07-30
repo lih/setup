@@ -294,7 +294,7 @@ network), which can't be said for `gcc -MM`-based approaches. Splice
 dependencies are very useful in many situations, from locating source
 files to performing full-blown package dependency analysis. Sadly, I
 haven't found many build tools that handle them without at least some
-conceptual trickiness (except for `[Shake](http://shakebuild.com)`,
+conceptual trickiness (except for [`Shake`](http://shakebuild.com),
 but the latter is written in Haskell, and not truly accessible to the
 beginning programmer writing his/her first build script).
 
