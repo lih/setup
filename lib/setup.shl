@@ -18,8 +18,10 @@ declare -gA \
 	SETUP_LEAVES=( ) \
 	SETUP_UNNEEDED_LEAVES=( ) \
         SETUP_MODULES=( ) \
+        SETUP_MOD_HELP=( ) \
         SETUP_LOADED=( ) \
-        SETUP_PARAMS=( )
+        SETUP_PARAMS=( ) \
+	SETUP_FINGERPRINT=( )
 
 shopt -s extglob
 
@@ -46,15 +48,16 @@ function Setup.startDateCoproc() {
     local xin xout
     exec {xin}<>"$SETUP_TMPDIR/date-out" {xout}<>"$SETUP_TMPDIR/date-in"
 
-    if [ -x /usr/bin/cc ]; then
-        # Calling an external "date" process to get each file's
-        # timestamp is not efficient.
+    if [ -x /usr/bin/cc ] \
+	   && {
+           # Calling an external "date" process to get each file's
+           # timestamp is not efficient.
 
-        # Instead, we run a small specialized C program to print a
-        # timestamp for each file in its input stream, which is much
-        # faster as it doesn't involve spawning a new process each
-        # time
-        cat > "$SETUP_TMPDIR/date.c" <<EOF
+           # Instead, we run a small specialized C program to print a
+           # timestamp for each file in its input stream, which is much
+           # faster as it doesn't involve spawning a new process each
+           # time
+           cat > "$SETUP_TMPDIR/date.c" <<EOF
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,11 +83,12 @@ int main(int argc, char* argv[]) {
   return 0;
 } 
 EOF
-        /usr/bin/cc "$SETUP_TMPDIR/date.c" -o "$SETUP_TMPDIR/date" 2>/dev/null
-	[ -x "$SETUP_TMPDIR/date" ] && "$SETUP_TMPDIR/date"
+           /usr/bin/cc "$SETUP_TMPDIR/date.c" -o "$SETUP_TMPDIR/date" 2>/dev/null
+       } && [ -x "$SETUP_TMPDIR/date" ]; then
+	exec "$SETUP_TMPDIR/date"
     else
         while read file; do
-            date -r "$file" +"%s 10#%N"
+	    date -r "$file" +"%s 10#%N"
         done
     fi <&"$xin" >&"$xout" &
     local pid="$!"
@@ -345,6 +349,13 @@ function Setup.runLeaves() {
     done
     SETUP_LEAVES=( )
 }
+function Setup.fingerprint() {
+    local arg
+    for arg; do
+	SETUP_STATE[$arg.ts-mode]=fingerprint
+	: ${SETUP_FINGERPRINT[$arg]:=0 0}
+    done
+}
 function Setup.ts.olderThan() {
     (( $1 < $3 || ($1 == $3 && $2 < $4) ))
 }
@@ -405,6 +416,32 @@ function Setup.need() {
 	fi
     fi	
 }
+function Setup.invalidate() {
+    local file="$1" next
+    local stat="${SETUP_STATE[$file.status]}"
+    local -a nexts
+
+    Setup.getArr nexts "$file.next-defined"
+    for next in "${nexts[@]}"; do
+	case "${SETUP_STATE[$next.status]}" in
+	    0:defined) (( SETUP_STATE[$next.depc]+=1 ));;
+	    *) SETUP_STATE[$next.status]=0:defined
+	       SETUP_STATE[$next.depc]=1 ;;&
+	    2:done) Setup.invalidate "$next" ;;
+	esac
+    done
+
+    Setup.getArr nexts "$file.next-primed"
+    for next in "${nexts[@]#*:}"; do
+	case "${SETUP_STATE[$next.status]}" in
+	    1:primed) (( SETUP_STATE[$next.argc]+=1 ))
+                      unset SETUP_LEAVES[$next];;
+	    2:done) SETUP_STATE[$next.status]=1:primed
+		    SETUP_STATE[$next.argc]=1
+		    Setup.invalidate "$next";;
+	esac
+    done
+}
 function Setup.isCycleFree.from() {
     if [ "${has_cycle[$1]+x}" == '' ]; then
         local next cycle=0
@@ -446,6 +483,8 @@ function Setup.isCycleFree.from() {
         return "${has_cycle[$1]}"
     fi
 }
+
+# Usage: Setup.isCycleFree
 function Setup.isCycleFree() {
     local -A visited=( ) has_cycle=( )
     local -a cycle_nodes=( )
@@ -469,7 +508,9 @@ function Setup.isCycleFree() {
     done
 }
 
+# Usage: Setup.hook FUNCTION...
 function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
+# Usage: Setup.params [PARAM|-PARAM]...
 function Setup.params() {
     local tgt
     for tgt; do
@@ -480,32 +521,8 @@ function Setup.params() {
     done
     return 1
 }
-function Setup.invalidate() {
-    local file="$1" next
-    local stat="${SETUP_STATE[$file.status]}"
-    local -a nexts
 
-    Setup.getArr nexts "$file.next-defined"
-    for next in "${nexts[@]}"; do
-	case "${SETUP_STATE[$next.status]}" in
-	    0:defined) (( SETUP_STATE[$next.depc]+=1 ));;
-	    *) SETUP_STATE[$next.status]=0:defined
-	       SETUP_STATE[$next.depc]=1 ;;&
-	    2:done) Setup.invalidate "$next" ;;
-	esac
-    done
-
-    Setup.getArr nexts "$file.next-primed"
-    for next in "${nexts[@]#*:}"; do
-	case "${SETUP_STATE[$next.status]}" in
-	    1:primed) (( SETUP_STATE[$next.argc]+=1 ))
-                      unset SETUP_LEAVES[$next];;
-	    2:done) SETUP_STATE[$next.status]=1:primed
-		    SETUP_STATE[$next.argc]=1
-		    Setup.invalidate "$next";;
-	esac
-    done
-}
+# Usage: Setup.state-file PATH
 function Setup.state-file() {
     if [ -z "$SETUP_STATE_FILE" ]; then
 	SETUP_STATE_FILE="$1"
@@ -530,21 +547,60 @@ function Setup.state-file() {
             fi
 
 	    Setup.updateSourceStamps
-	fi
+ 	fi
     fi
 }
-function Setup.use() {
-    local mod
-    for mod; do
-	if [ "${SETUP_MODULES[$mod]:+x}" == '' ]; then
-	    source "$SETUP_INSTALL_DIR/lib/setup.d/${mod%.shl}.shl"
-	    SETUP_MODULES[$mod]=true
+function Setup.use.cmpVer() {
+    local -a va vb
+    local IFS=. i
+    va=( $1 )
+    vb=( $2 )
+    for((i=0;i<4;i++)); do
+	if ((va[i] > vb[i])); then
+	    return 2
+	elif ((va[i] < vb[i])); then
+	    return 1
 	fi
-	if [ -r "${SETUP_USER_MODULES:-.setup/lib}/$mod.shl" ]; then
-	    source "${SETUP_USER_MODULES:-.setup/lib}/$mod.shl"
+    done
+    return 0
+}
+# Usage: Setup.use (MODULE[:MIN_VERSION[:MAX_VERSION]])...
+function Setup.use() {
+    local mod minver maxver
+    for mod; do
+	minver="${mod#${mod%%:*}}"; minver="${minver#:}"
+	maxver="${minver#${minver%:*}}"; maxver="${maxver#:}"
+	minver="${minver%:*}"
+	mod="${mod%%:*}"
+	if [ "${SETUP_MODULES[$mod]:+x}" == '' ]; then
+	    if [ ! -e "Setup.d/$mod.shl" ]; then
+		if [ -e "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" ]; then
+		    mkdir -p Setup.d
+		    cp "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" "Setup.d/$mod.shl"
+		else
+		    Setup.log CRIT "Error: could not locate a module source for '$mod'"
+		    exit 1
+		fi
+	    fi
+	    source "Setup.d/$mod.shl"
+	fi
+	local ret
+	if { [ -n "$minver" ] && { Setup.use.cmpVer "${SETUP_MODULES[$mod]}" "$minver"; (($? == 1)); } \
+	   } || { [ -n "$maxver" ] && { Setup.use.cmpVer "${SETUP_MODULES[$mod]}" "$maxver"; (($? == 2)); }
+	   } ; then
+	    Setup.log CRIT "Error: Invalid version for module '$mod' (expected $minver${maxver:+ to $maxver}, got ${SETUP_MODULES[$mod]})"
+	    exit 1
 	fi
     done
 }
+# Usage: Setup.require (MODULE[:MIN_VERSION[:MAX_VERSION]])...
+function Setup.require() { Setup.use "$@"; }
+# Usage: Setup.provide MODULE VERSION
+function Setup.provide() {
+    SETUP_MODULES[$1]="$2";
+    SETUP_MOD_HELP[$1]="$(sed -n 's/^# Usage: //p' "${BASH_SOURCE[1]}")"
+}
+# Usage: Setup.load SCRIPT PARAM...
 function Setup.load() {
     local path file
 
@@ -588,7 +644,7 @@ function Setup.atexit() {
 }
 trap Setup.atexit EXIT
 
-# Usage : prepare file... = cmd [file|@file|-tag]...
+# Usage: prepare FILE... = COMMAND [FILE|@FILE|-FLAG]...
 function prepare() {
     local -a targets
     while [ "$1" != '=' ]; do
@@ -644,13 +700,14 @@ function prepare() {
     fi
     Setup.need "$can"
 }
+# Usage: prepare-match PATTERN = COMMAND [FILE|@FILE|-FLAG]...
 function prepare-match() {
     local -a rest=( "${@:3}" )
     rest=( "${rest[@]/#/\"}" )
     rest=( "${rest[@]/%/\"}" )
     eval "function Setup.matchHook.$SETUP_MATCH_HOOKS_N() { 
     local file=\"\$1\"
-    [[ \"\$file\" =~ ^/$1$ ]] && {
+    [[ \"\$file\" =~ ^/$1\$ ]] && {
         set -- \"\${BASH_REMATCH[@]:1}\"
         prepare \"\$file\" = ${rest[*]}
     }
@@ -772,3 +829,5 @@ function teardown() {
         done
     done
 }
+
+Setup.provide Setup 1.0.0.1

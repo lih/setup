@@ -1,0 +1,323 @@
+#!/bin/bash
+: ${PKG_PREFIX="/$SETUP_PREFIX"}
+: ${PKG_BUILD="${PKG_PREFIX}.build"}
+: ${PKG_SRC="${PKG_PREFIX}src"}
+: ${PKG_ETC="${PKG_PREFIX}etc"}
+: ${PKG_DIST=.pkg}
+: ${PKG_VENDOR="${PKG_PREFIX}.vendor"}
+
+function Pkg.incRev() {
+    local val="$(< "$1")" 2>/dev/null
+    echo "$((${val:-0}+1))" > "$1"
+}
+
+function Pkg.pacman.Installer() {
+    mkpdir "$1"
+    local file="$(< "$2")"
+
+    if [ "$file" ]; then
+	cat <<EOF
+function post_install() { $file install "\$1"; }
+function pre_upgrade() { $file pre-upgrade "\$2"; }
+	 
+function post_upgrade() { $file post-upgrade "\$2"; }
+function pre_remove() { $file uninstall "\$1"; }
+EOF
+    fi > "$1"
+
+}
+function Pkg.pacman.PkgBuild() {
+    local dest="$1"
+    shift
+    local -a aliases=( $(< "$1") )
+    shift
+    local name="${1#-}" version="$(< "$2")" rev="$(< "$3")"
+    shift 3
+    local author="$(< "$1")" email="$(< "$2")"
+    shift 2
+    local description="$(< "$1")" arch="$(< "$2")" depends_file="$3" replaces_file="$4"
+    shift 4
+    local srcar="$1"
+    shift
+    local postinst="${1##*/}"
+    shift
+
+    declare -A lookup
+    for a in "${aliases[@]}"; do
+	lookup[${a%%@*}]="${a#*@}"
+    done
+    for dep in $(cat "$depends_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+
+	depends+=( "'${lookup[$d]:-$d${minbound:+>=$minbound}}'" )
+    done
+    for dep in $(cat "$replaces_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+
+	replaces+=( "'${lookup[$d]:-$d${minbound:+>=$minbound}}'" )
+    done
+
+    declare -A archs=(
+	[x64]=x86_64 [x86_64]=x86_64 [amd64]=x86_64
+	[x86]=x86    [i386]=x86
+	[all]=any    [any]=any
+    )
+
+    mkpdir "$dest"
+    cat > "$dest" <<EOF
+# Maintainer: $author <$email>
+pkgname=$name
+pkgver=$version
+pkgrel=$rev
+pkgdesc="$description"
+arch=( ${archs[$arch]} )
+license=('GPL')
+packager="$author <$email>"
+groups=()
+depends=( ${depends[@]} )
+makedepends=()
+optdepends=()
+provides=()
+conflicts=()
+replaces=( ${replaces[@]} )
+backup=()
+options=( '!upx' )
+install=
+changelog=
+source=( source.tar.gz )
+noextract=()
+install=$postinst
+
+build() {
+  :
+}
+
+package() {
+  cd "\$srcdir"
+
+  rsync -a ./ --exclude 'source.tar.gz' "\$pkgdir"
+}
+EOF
+}
+function Pkg.pacman.TarXZ() {
+    local dest="$SETUP_ROOT/$1"
+    shift
+    local dir="${2%/*}"
+    cp "$1" "$dir/source.tar.gz"
+    (
+	cd "$dir"
+	makepkg -g >> PKGBUILD \
+	    && makepkg -fd \
+	    && {
+		mkpdir "$dest"
+		rm -f "$dest"
+		mv *.pkg.tar.[xg]z "$dest"
+	    }
+    )
+}
+function Pkg.bundle.pacman() {
+    prepare "$PKG_BUILD/pacman/$1/package.install" = Pkg.pacman.Installer "$PKG_SRC/$1/etc/installer"
+    prepare "$PKG_BUILD/pacman/$1/PKGBUILD" = \
+	    Pkg.pacman.PkgBuild "$PKG_ETC/aliases.pacman" -"$1" \
+	    "$PKG_SRC/$1/etc/"{version,revision,maintainer-name,maintainer-email,synopsis,architecture,dependencies,replaces} \
+	    "$PKG_SRC/$1/$PKG_DIST.tar.gz" \
+	    "$PKG_BUILD/pacman/$1/package.install"
+    prepare "$2" = Pkg.pacman.TarXZ "$PKG_SRC/$1/$PKG_DIST.tar.gz" "$PKG_BUILD/pacman/$1/PKGBUILD"
+}
+
+function Pkg.deb.Control() {
+    local dest="$1"			; shift
+    local -a aliases=( $(< "$1") )	; shift
+    local name="${1#-}"
+    shift
+    local version="$(< "$1")"           ; shift
+    local rev="$(< "$1")"		; shift
+    local email="$(< "$1")"		; shift
+    local maintainer="$(< "$1")"	; shift
+    local depends_file="$1"		; shift
+    local replaces_file="$1"            ; shift
+    local arch="$(< "$1")"		; shift
+    local description="$(< "$1")"	; shift
+
+    declare -A lookup
+    for a in "${aliases[@]}"; do
+	lookup[${a%%@*}]="${a#*@}"
+    done
+
+    local dep minbound maxbound depends= replaces=
+    for dep in $(< "$depends_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+	depends+="${depends:+,}${lookup[$d]:-$d${minbound:+ (>= $minbound)}}"
+    done
+    for dep in $(< "$replaces_file"); do
+	d="${dep%+*}"
+	minbound="${dep#$d}"
+	minbound="${minbound#+}"
+	replaces+="${replaces:+,}${lookup[$d]:-$d${minbound:+ (>= $minbound)}}"
+    done
+
+    declare -A archs
+    archs=(
+	['x64']=amd64 ['x86_64']=amd64 ['amd64']=amd64
+	['x86']=i386  ['i386']=i386
+	['all']=all   ['any']=all
+    )
+
+    mkpdir "$dest"
+    cat > "$dest" <<EOF
+Package: $name
+Version: $version-$rev
+Architecture: ${archs[$arch]}
+Maintainer: $maintainer <$email>
+${depends:+Depends: $depends"
+"}${replaces:+Replaces: $replaces"
+"}Description: $(IFS=$'\n'; printf " %s\n" $description)
+EOF
+}
+function Pkg.deb.Installer() {
+    local postinst="$1"		; shift
+    local prerm="$1"		; shift
+
+    local src="$(< "$1")"	; shift
+    local vers="$(< "$1")"	; shift
+    local rev="$(< "$1")"	; shift
+
+    mkpdir "$postinst" "$prerm"
+
+    if [ "$src" ]; then
+	cat > "$postinst" <<EOF
+#!/bin/bash
+case "\$1" in
+  configure)
+    if [ "\${2:+x}" == x ]; then
+      "$src" post-upgrade "$vers-$rev"
+    else
+      "$src" install "$vers-$rev"
+    fi
+    ;;
+esac
+EOF
+	cat > "$prerm" <<EOF
+#!/bin/bash
+case "\$1" in
+  remove)
+    "$src" uninstall "$vers-$rev"
+    ;;
+  upgrade)
+    "$src" pre-upgrade "$vers-$rev"
+    ;;
+esac
+EOF
+    else
+	echo "#!/bin/bash" > "$postinst"
+	echo "#!/bin/bash" > "$prerm"
+    fi
+    chmod +x "$postinst" "$prerm"
+}
+function Pkg.deb.DpkgBuild() {
+    local dest="$1"; shift
+    local ar="$1"; shift
+    local root="${1%/DEBIAN/*}"
+    tar -xzf "$ar" -C "$root"
+    fakeroot dpkg-deb -Zgzip -b "$root" "$dest"
+}
+function Pkg.bundle.deb() {
+    prepare "$PKG_BUILD/deb/$1/root/DEBIAN/control" = Pkg.deb.Control \
+	    "$PKG_ETC/aliases.deb" -"$1" \
+	    "$PKG_SRC/$1/etc/"{version,revision,maintainer-{email,name},dependencies,replaces,architecture,description}
+    prepare "$PKG_BUILD/deb/$1/root/DEBIAN/"{postinst,prerm} = Pkg.deb.Installer "$PKG_SRC/$1/etc/"{installer,version,revision}
+    prepare "$PKG_BUILD/deb/$1/package.bundle" = \
+	    Pkg.deb.DpkgBuild "$PKG_SRC/$1/$PKG_DIST.tar.gz" "$PKG_BUILD/deb/$1/root/DEBIAN/"{control,postinst,prerm} \
+	    
+}
+
+Setup.hook Pkg.auto-files
+function Pkg.auto-files() {
+    {
+	[[ "$1" =~ ^("$PKG_BUILD")/([^/]*)/([^/]*)/(.*) ]] && {
+	    local root="${BASH_REMATCH[1]}" pkgtype="${BASH_REMATCH[2]}" pkgname="${BASH_REMATCH[3]}" path="${BASH_REMATCH[4]}"
+	    case "$path" in
+		package.bundle) Pkg.bundle."$pkgtype" "$pkgname" "$1";;
+		*) return 1;;
+	    esac
+	}
+    } || {
+	[[ "$1" =~ ^"$PKG_SRC"/([^/]*)/etc/(version|revision|maintainer(-name|-email)|description|synopsis|architecture|dependencies|replaces|installer) ]] && {
+	    case "${BASH_REMATCH[2]}" in
+		revision) prepare "$1" = Pkg.incRev "$PKG_SRC/${BASH_REMATCH[1]}/$PKG_DIST.tar.gz";;
+		*)        prepare "$1" = Empty;;
+	    esac
+	}
+    } 
+}
+
+function Pkg.package() {
+    local -a PKG_FILES=( )
+    "$@"
+    prepare "$PKG_DIST.tar.gz" = Tar -"s,${SETUP_PREFIX}$PKG_DIST/,," "${PKG_FILES[@]/#/$PKG_DIST/}"
+    if Setup.params -autocommit; then
+	prepare .autocommit = Git.autocommit "$PKG_DIST.tar.gz"
+    fi
+}
+function Pkg.man-pages() {
+    local page file
+    for page in $1; do
+	file="usr/share/man/man${page: -1}/$page.gz"
+	prepare "$DOC_BUILD/$page" = Doc.man "$page.md"
+	prepare "$PKG_DIST/$file" = GZip "$DOC_BUILD/$page"
+	PKG_FILES+=( "$file" )
+    done
+    "${@:2}"
+}
+function Pkg.po-files() {
+    local dir="$1" po locale file
+    local -a pos=( $2 )
+    for po in "${pos[@]}"; do
+	locale="${po%%/*}" path="${po#*/}"
+	file="usr/share/locale/$locale/LC_MESSAGES/${path/%.po/.mo}"
+	prepare "$PKG_DIST/$file" = Pkg.PO2MO "$dir/$po"
+	PKG_FILES+=( "$file" )
+    done
+    "${@:3}"
+}
+function Pkg.files() {
+    local -a files=(  )
+    local file src dst
+    for file; do
+	case "$file" in
+	    *=*) src="${file#*=}"; dst="${file%%=*}";;
+	    *)   src="$file";      dst="$file";;
+	esac
+	prepare "$PKG_DIST/$dst" = Copy "$src"
+	PKG_FILES+=( "$dst" )
+    done
+}
+
+function Pkg.PO2MO() { mkpdir "$1" ; msgfmt "$2" -o "$1" ; }
+
+declare -gA PKG_SUB_PREFIX=( ) 
+
+function Pkg.name() {
+    PKG_SUB_PREFIX[$1]="${2:-/$SETUP_PREFIX}"
+}
+function Pkg.depends() {
+    local arg name url pref
+    for arg; do
+        name="${arg%%=*}"
+        url="${arg#*=}"
+        pref="${PKG_SUB_PREFIX[$name]:-$PKG_VENDOR/$name/}"
+        if [ ! -e "$SETUP_ROOT${pref}Setup" ]; then
+            case "$url" in
+                git://*|https://*.git)
+                    git clone "$url" "$SETUP_ROOT$pref";;
+            esac
+        fi
+        Setup.load "${pref}Setup"
+    done
+}

@@ -10,22 +10,23 @@ Setup.shl: A simple Bash library to replace Makefiles
 ![demo](https://github.com/lih/misc-resources/raw/master/setup-demo.gif)
 
 `make` (and similar dependency-chasing tools, such as SCons, Rake,
-Waf, Ant, Maven, Gradle et al, which I will refer to as `make`-like
-tools from now on) offer very useful primitives for building complex
-file hierarchies from a small set of source files, while minimizing
-the amount of work needed to rebuild after a small change.
+Waf, Ant, Maven, Gradle et al) offer very useful primitives for
+building complex file hierarchies from a small set of source files,
+while minimizing the amount of work needed to rebuild after a small
+change.
 
 Setup.shl tries to offer the same basic set of features, as a (mostly
-pure) Bash library. It supports parallel compilation, and nested
-builds, as well as a new kind of dependency, all in 20kB of Bash
-code. Other than that, it tries to be as easy to use as possible.
+pure) Bash library. It supports parallel compilation with buffered
+outputs, continuous builds, nested builds, as well as a new kind of
+dependency, all in 20kB of Bash code. Other than that, it tries to be
+as easy to use as possible.
 
 Installing and using Setup.shl
 --------------------------
 
-Since it's basically just a Bash script, you can start using Setup.shl
-from your shell by simply setting the `SETUP_INSTALL_DIR` variable to
-the root of this project, and sourcing the
+Since it is just a Bash script at its core, you can start using
+Setup.shl from your shell by simply setting the `SETUP_INSTALL_DIR`
+variable to the root of this project, and sourcing the
 [lib/setup.shl](lib/setup.shl) file (if you are using Bash, that is).
 
 Even if it is mostly Bash, the core Setup.shl still needs a few
@@ -38,6 +39,8 @@ utilities to function, which are listed below :
   - `date` to query files for their timestamps and get the system date
   - GNU `getopt`, only if you are using `bin/setup`, to parse
     command-line arguments
+  - optionally, if `cc` is installed on your system, it is used to
+    speed up some parts of the build process.
 
 This file defines two functions, `prepare` and `setup` (and a third,
 `teardown`, if you want to perform continuous builds), whose jobs are
@@ -46,7 +49,7 @@ to respectively prepare computations and run them.
 This repository also provides a [bin/setup](bin/setup) executable that
 does something similar to the `make` tool : it searches a file named
 `Setup` in the current directory or its parents, and runs that file in
-an environment where the setup library was already sourced. It can
+an environment where the Setup.shl library was already sourced. It can
 also optionally, using the `--watch` option, keep its eye on all
 source files and trigger a new build every time they are written to.
 
@@ -85,6 +88,11 @@ it, in addition to the TARGETs passed as  arguments.
 
 Like `make`, `setup` uses timestamps to avoid wastefully recompiling
 when a file is already more recent than its dependencies.
+
+The `[bin/setup](bin/setup)` interpreter automatically calls this
+function after loading a Setup script, so you won't usually need to
+call it yourself. It may be useful if you decide to write your own
+interpreter.
 
 ### The `teardown` function
 
@@ -129,8 +137,8 @@ variables :
     target=TARGET` for both).
 
   - the `Setup.use MODULE...` function loads modules from the
-    `$SETUP_INSTALL_DIR/lib/setup.d/MODULE.shl` files. It's basically
-    a wrapper around `source`.
+    `$SETUP_INSTALL_DIR/lib/setup.d/MODULE.shl` files. It is an almost
+    trivial wrapper around `source`.
 
     After loading a module, it also tries to sources a local module
     file from `.setup/lib/MODULE.shl` if it exists, allowing you to
@@ -151,7 +159,7 @@ variables :
 
     A generator is a function which take a single file name as
     argument, and should prepare this file if it knows how. Otherwise,
-    it should return non-zero to signal to try the next generator.
+    it should return non-zero to signal to try another generator.
 
   - the `Setup.state-file NAME` function specifies an optional state
     file, which is used by Setup.shl to remember information from one
@@ -165,10 +173,10 @@ variables :
     Warning: the `prepare` function doesn't do anything if a file is
     already known to the build system. When using a state file, that
     means that once a file is specified, you can no longer change the
-    command it is associated with, or its arguments (splice arguments
-    are still recomputed correctly, don't worry), even in subsequent
-    builds. If that happens, simply delete the state file, and restart
-    the build to acknowledge the new dependency graph.
+    command it is associated with, or its arguments, even in
+    subsequent builds (splice arguments are still recomputed
+    correctly, though). If that happens, simply delete the state file,
+    and restart the build to acknowledge the new dependency graph.
 
 ### Automatic targets via dependency hooks
 
@@ -245,13 +253,14 @@ that it depends on `A.h`, or even `test.h`. We would like to be able
 to express the dependency as "`%.o` depends on `%.c` and _all the
 includes of `%.c`_', but our tools don't allow us to express that last
 part because the includes of %.c are generated, and not known when the
-Makefile is read.
+build script is read.
 
 This inability to use the content of generated files within the
 dependency graph leads to a lot of silliness down the line. For
 instance, many compilers/interpreters now offer a `-MM` option, used
 to generate a complete dependency graph in a Makefile format, which
-can then be included by the main Makefile.
+can then be included by the main Makefile to fill out the dependency
+graph.
 
 Using Setup.shl, these same dependencies can be simply expressed as : 
 
@@ -264,7 +273,7 @@ to compute a list of include names in `"$1.includes"`, then splice
 that list and use each element as a dependency. 
 
 This supposes the existence of an `Includes` function that is able to
-produces all the includes of a source file, recursively. However, even
+produce all the includes of a source file, recursively. However, even
 if we only had a naive implementation that only scans the source file
 (using `sed`, for example), Setup.shl would be able to infer the
 correct build dependencies, by adding a third rule :
@@ -284,23 +293,24 @@ if a source file is autogenerated (or automatically retrieved from the
 network), which can't be said for `gcc -MM`-based approaches. Splice
 dependencies are very useful in many situations, from locating source
 files to performing full-blown package dependency analysis. Sadly, I
-haven't found a single build tool that handles them without severe
-hassles (although it may well be that I just haven't looked hard
-enough), which is the main reason that I set out to create one.
+haven't found many build tools that handle them without at least some
+conceptual trickiness (except for `[Shake](http://shakebuild.com)`,
+but the latter is written in Haskell, and not truly accessible to the
+beginning programmer writing his/her first build script).
 
-I'd love to see other build tools adopt them, though, and I welcome
-any developer of such tools to contact me (by creating an issue on
-this project) if they want some help getting started.
+I'd love to see more build tools adopt them, though, and I welcome any
+developer of such tools to contact me (by creating an issue on this
+project) if they want some help getting started.
 
 ### Nested builds
 
 Suppose you have two projects, A and B, such that A needs a part of B
-to do its job (imagine that B can produce a certain library, which A
-needs). B doesn't need A to function, so it provides its own
-independent build script as a way to define its setup. Ideally, A
-would be able to load B's build script, and add its own rules before
-running a full-blown build operation with all the information it
-needs, without any changes to B whatsoever.
+to do its job (imagine that B can produce a certain library, against
+which A needs to link). B doesn't need A to function, so it provides
+its own independent build script as a way to define its
+setup. Ideally, A would be able to load B's build script, and add its
+own rules before running a full-blown build operation with all the
+information it needs.
 
 Setup.shl allows this workflow by providing a function, `Setup.load`,
 which -- as the name implies -- loads a nested Setup script from a
@@ -333,11 +343,11 @@ steps to be taken before rebuilding the affected packages.
 Note the shebang lines at the beginning of both Setups. In cases like
 the above, where the Setup script is called from its project
 directory, the shebangs are not necesary. In fact, they are never
-necesary, but they can be useful if you want to achieve maximum
-comfort when building your project. For example, if you find yourself
-repeatedly needing to run `setup -f PROJDIR/Setup`, you can easily
-make your Setup file executable and create a symbolic link to it
-somewhere in your PATH (in `$HOME/.bin` for instance), like so :
+necesary, but they can be useful if you want to achieve a maximal
+level of comfort when building your project. For example, if you find
+yourself repeatedly needing to run `setup -f PROJDIR/Setup`, you can
+easily make your Setup file executable and create a symbolic link to
+it somewhere in your PATH (in `$HOME/.bin` for instance), like so :
 
     chmod +x PROJDIR/Setup
     ln -s PROJDIR/Setup "$HOME/.bin/my-setup" 
