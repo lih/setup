@@ -1,26 +1,26 @@
 #!/bin/bash
 Setup.provide base 1.0
 
-# Usage: mkpdir FILE...
+## Function: mkpdir FILE...
 function mkpdir() { mkdir -p $(dirname "$@"); }
 
-# Usage: Trigger DEST -COMMAND ARG...
+## Function: Trigger DEST -COMMAND ARG...
 function Trigger() { mkpdir "$1"; eval "${2#-}" >"$1" 2>&1; }
-# Usage: Echo DEST ARG...
+## Function: Echo DEST ARG...
 function Echo() { local dst="$1"; shift; mkpdir "$dst"; printf "%s\n" "${@#-}" > "$dst"; }
-# Usage: Copy DEST SRC
+## Function: Copy DEST SRC
 function Copy() { mkpdir "$1"; cp "$2" "$1"; }
-# Usage: Concat DEST FILE...
+## Function: Concat DEST FILE...
 function Concat() { mkpdir "$1"; cat "${@:2}" > "$1"; }
-# Usage: Sorted DEST FILE...
+## Function: Sorted DEST FILE...
 function Sorted() { mkpdir "$1"; cat "${@:2}" | LC_ALL=C sort -u > "$1"; }
-# Usage: Lookup DEST -STRING FILE
+## Function: Lookup DEST -STRING FILE
 function Lookup() { mkpdir "$1"; set -o pipefail; LC_ALL=C look -t: "${2#-}" "$3" | head -1 | cut -d: -f2 > "$1"; }
-# Usage: Empty DEST
+## Function: Empty DEST
 function Empty() { mkpdir "$1"; printf '' > "$1"; }
-# Usage: Filter DEST SRC WORD_LIST [OPTIONS]
+## Function: Filter DEST SRC WORD_LIST [OPTIONS]
 function Filter() { mkpdir "$1"; grep $4 -xf "$3" "$2" > "$1"; return 0; }
-# Usage: Foreach DEST -PATTERN
+## Function: Foreach DEST -PATTERN
 function Foreach() {
     local word dst="$1" pat="${2#-}"
     shift 2
@@ -33,17 +33,17 @@ function Foreach() {
     done > "$dst"
 }
 
-# Usage: Tar DEST -TRANSFORM FILE...
+## Function: Tar DEST -TRANSFORM FILE...
 function Tar() {
     local re="${2#-}" dst="$1"
     shift 2
     mkpdir "$dst"
     tar -czf "$dst" --transform="$re" "$@"
 }
-# Usage: GZip DEST SRC
+## Function: GZip DEST SRC
 function GZip() { mkpdir "$1"; gzip < "$2" > "$1"; }
 
-# Usage: Git.autocommit DEST
+## Function: Git.autocommit DEST
 function Git.autocommit() {
     (
 	msg="$(Setup.params autocommit)"
