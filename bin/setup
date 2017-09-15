@@ -33,6 +33,16 @@ while (( $# > 0 )); do
     esac
 done
 
+shopt -s extglob
+if [ "${SETUP_INSTALL_DIR+x}" == '' ]; then
+    case "$0" in
+        */*) SETUP_INSTALL_DIR=${0/%\/*([^\/])//..};;
+        *)   
+            echo "\$0: $0" >&2
+            SETUP_INSTALL_DIR="$(which "$0")"; SETUP_INSTALL_DIR="${SETUP_INSTALL_DIR/%\/*//..}";;
+    esac
+fi
+
 case "$action" in
     show_help)
 	cat <<EOF
@@ -86,8 +96,7 @@ bstart
 	else
             cd "${script%/*}"
 	fi    
-
-	: ${SETUP_INSTALL_DIR:=${0/%\/*//..}}
+        
 	source "$SETUP_INSTALL_DIR/lib/setup.shl" "${script_args[@]}"
 
 	function init-setup() {
