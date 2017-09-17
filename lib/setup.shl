@@ -222,7 +222,7 @@ function Setup.addPrefix() {
 
 function Setup.recipeHook() {
     [ "${SETUP_RECIPES[${1#/}]:+x}" == 'x' ] && {
-        local -a args="${SETUP_RECIPES[${1#/}]:+x}"
+        local -a args="${SETUP_RECIPES[${1#/}]}"
         prepare "${args[@]}"
     }
 }
