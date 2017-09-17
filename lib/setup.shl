@@ -21,7 +21,8 @@ declare -gA \
         SETUP_MOD_HELP=( ) \
         SETUP_LOADED=( ) \
         SETUP_PARAMS=( ) \
-	SETUP_FINGERPRINT=( )
+	SETUP_FINGERPRINT=( ) \
+        SETUP_RECIPES=( )
 
 shopt -s extglob
 
@@ -183,9 +184,15 @@ function Setup.addPrefix() {
     fi
 }
 
+function Setup.recipeHook() {
+    [ "${SETUP_RECIPES[${1#/}]:+x}" == 'x' ] && {
+        local -a args="${SETUP_RECIPES[${1#/}]:+x}"
+        prepare "${args[@]}"
+    }
+}
 function Setup.runDependHooks() {
     [ "${SETUP_STATE[$1.can]:+x}" == x ] || {
-	for hook in "${SETUP_AUTO_DEPEND_HOOKS[@]}"; do
+	for hook in Setup.recipeHook "${SETUP_AUTO_DEPEND_HOOKS[@]}"; do
 	    "$hook" "/$1" && return
         done
         false
@@ -712,6 +719,22 @@ function prepare-match() {
 }"
     Setup.hook "Setup.matchHook.$SETUP_MATCH_HOOKS_N"
     ((SETUP_MATCH_HOOKS_N++))
+}
+# Usage: recipe FILE... = COMMAND [FILE|@FILE|-FLAG]...
+function recipe() {
+    local -a tgts=( )
+    while [ "$1" != '=' ]; do
+        tgts+=( "$1" )
+        shift
+    done
+    shift
+    Setup.addPrefix tgts
+    local -a args=( "${tgts[@]/#//}" = "$@" )
+    local tgt recipe
+    recipe="$(declare -p args)"
+    for tgt in "${tgts[@]}"; do
+        SETUP_RECIPES[$tgt]="${recipe#*=}"
+    done
 }
 # Usage: setup TARGET...
 function setup() {
