@@ -1,13 +1,15 @@
 #!/bin/bash
-eval "set -- $(getopt -o 'hwf:' -l help,watch,setup-file -- "$@")"
+eval "set -- $(getopt -o 'hwx:f:' -l help,watch,setup-file:,extract:,module-api:,api-format: -- "$@")"
 script=
 script_args=( )
 watch_sources=
-show_help=
+action=setup
+api_format=markdown
 while (( $# > 0 )); do
     opt="$1"; shift
     case "$opt" in
         -w|--watch) watch_sources=true;;
+	-x|--extract) action=extract;;
         -f|--setup-file)
             case "$1" in
                 git://*|https://*.git)
@@ -23,14 +25,19 @@ while (( $# > 0 )); do
             program="${script##*/}"
             shift
             ;;
-        -h|--help) show_help=true;;
+        -h|--help) action=show_help;;
+	--module-api) action="show_api $1"; shift;;
+	--api-format) api_format="$1"; shift;;
+	--) :;;
         *) script_args+=( "$opt" );;
     esac
 done
 
-if [ "$show_help" ]; then
-    cat <<EOF
-Usage: $0 [-h|--help] [-w|--watch] [-f FILE|--setup-file FILE] [TARGET[=VALUE]]...
+case "$action" in
+    show_help)
+	cat <<EOF
+Usage: $0 [-h|--help|--module-api MODULE [--api-format (raw|markdown)]] [-w|--watch] 
+          [-f FILE|--setup-file FILE] (TARGET[=VALUE])...
 
 Runs a setup operation using Setup.shl (a build library for
 Bash). Returns non-zero if the build failed.
@@ -43,77 +50,105 @@ Options:${script:+
   --script-file $script}${watch_sources:+
   --watch}
 EOF
-else
-    if [ -z "$script" ]; then
-        until [ "$PWD" == / ] || [ -e Setup ]; do cd ..; done
-        if [ -e Setup ]; then
-            program=Setup
-        else
-            echo "Error: No Setup file found in the current directory or its parents." >&2
-            exit 1
-        fi
-    else
-        cd "${script%/*}"
-    fi    
+	;;
+    show_api*)
+	mod="${action#show_api }"
+	source "$SETUP_INSTALL_DIR/lib/setup.shl" "${script_args[@]}"
+	Setup.require "$mod"
+	printf "%s\n" "${SETUP_MOD_HELP[$mod]}" | case "$api_format" in
+	    markdown)
+		sed -r '
+:start		
+s/^Function:\s*(\S+(\s+\.\.\.\s+\S+)*)(.*)$/Function \1\n-------\n\n**Usage**: `\1\3`\n/;tbegin
+s/^(Variable|Hash table|Array|Constant)\s+(\S+):\s*(.*)$/\1 \2\n------\n\n\3/
+T
+:begin
+n
+s/^  //
+tbegin
+i\
 
-    : ${SETUP_INSTALL_DIR:=${0/%\/*//..}}
-    source "$SETUP_INSTALL_DIR/lib/setup.shl" "${script_args[@]}"
-
-    function init-setup() {
-        Setup.use base
-        source "$program" --
-        setup
-    }
-    function show-failed() {
-        local red=$'\033[31m'
-        local yellow=$'\033[33m'
-        local def=$'\033[m'
-        local IFS=$'\n'
-        for err in "${SETUP_FAILED[@]}"; do
-            printf "${red}Error[%s]: %s %s${def}\n" "${SETUP_STATE[$err.errno]}" "${SETUP_STATE[$err.cmd]}" "$err"
-            printf "${red}|${yellow} %s${def}\n" $(< "$SETUP_TMPDIR/log/$err.log")
-        done >&2
-        if (( ${#SETUP_FAILED[@]} == 0 )); then :; else return 1; fi
-    }
-
-    if [ "$watch_sources" ]; then
-        declare -A tracked_files=( ) inotify_pid=
-        mkfifo "$SETUP_TMPDIR/inotify-out"
-        SETUP_ATEXIT_COMMANDS+=( 'if [ -n "$inotify_pid" ]; then kill $inotify_pid; fi' )
-        function track-new-files() {
-            local arg added=0
-            for arg in "${SETUP_SOURCE_FILES[@]}"; do
-	        if [ "${tracked_files[$arg]:+x}" == '' ]; then
-	            echo "Adding $arg to the watch list"
-	            tracked_files[$arg]=1
-                    ((added++))
-	        fi
-            done
-            if (( added > 0 )); then
-                if [ -n "$inotify_pid" ]; then kill $inotify_pid; fi
-                inotifywait -q -e close_write,delete_self -m "${!tracked_files[@]}" > "$SETUP_TMPDIR/inotify-out" & inotify_pid="$!"
+bstart
+'
+		;;
+	    raw) printf "%s\n" "$(< /dev/stdin)";;
+	esac
+	;;
+    setup|extract)
+	if [ -z "$script" ]; then
+            until [ "$PWD" == / ] || [ -e Setup ]; do cd ..; done
+            if [ -e Setup ]; then
+		program=Setup
+            else
+		echo "Error: No Setup file found in the current directory or its parents." >&2
+		exit 1
             fi
-        }
-        function rebuild-saved-files() {
-            while read root ev file; do
-                case ",$ev," in
-	            *,CLOSE_WRITE,*|*,DELETE_SELF,*)
-	                echo "$root was updated"
-	                teardown "$root"
-                        setup
-	                track-new-files
-                        show-failed
-	                ;;
-                esac
-            done < "$SETUP_TMPDIR/inotify-out"
-        }
-    fi
+	else
+            cd "${script%/*}"
+	fi    
 
-    init-setup
-    if [ "$watch_sources" ]; then
-        track-new-files 
-        rebuild-saved-files
-    else
-        show-failed && Setup.isCycleFree
-    fi
-fi
+	: ${SETUP_INSTALL_DIR:=${0/%\/*//..}}
+	source "$SETUP_INSTALL_DIR/lib/setup.shl" "${script_args[@]}"
+
+	function init-setup() {
+            Setup.use base
+            Setup.load "/$program" --
+	    setup
+	    if [ "$action" == extract ]; then
+		Setup.extract "${script_args[@]}"
+	    fi
+	}
+	function show-failed() {
+            local red=$'\033[31m'
+            local yellow=$'\033[33m'
+            local def=$'\033[m'
+            local IFS=$'\n'
+            for err in "${SETUP_FAILED[@]}"; do
+		printf "${red}Error[%s]: %s %s${def}\n" "${SETUP_STATE[$err.errno]}" "${SETUP_STATE[$err.cmd]}" "$err"
+		printf "${red}|${yellow} %s${def}\n" $(< "$SETUP_TMPDIR/log/$err.log")
+            done >&2
+            if (( ${#SETUP_FAILED[@]} == 0 )); then :; else return 1; fi
+	}
+
+	if [ "$watch_sources" ]; then
+            declare -A tracked_files=( ) inotify_pid=
+            mkfifo "$SETUP_TMPDIR/inotify-out"
+            SETUP_ATEXIT_COMMANDS+=( 'if [ -n "$inotify_pid" ]; then kill $inotify_pid; fi' )
+            function track-new-files() {
+		local arg added=0
+		for arg in "${SETUP_SOURCE_FILES[@]}"; do
+	            if [ "${tracked_files[$arg]:+x}" == '' ]; then
+			echo "Adding $arg to the watch list"
+			tracked_files[$arg]=1
+			((added++))
+	            fi
+		done
+		if (( added > 0 )); then
+                    if [ -n "$inotify_pid" ]; then kill $inotify_pid; fi
+                    inotifywait -q -e close_write,delete_self -m "${!tracked_files[@]}" > "$SETUP_TMPDIR/inotify-out" & inotify_pid="$!"
+		fi
+            }
+            function rebuild-saved-files() {
+		while read root ev file; do
+                    case ",$ev," in
+			*,CLOSE_WRITE,*|*,DELETE_SELF,*)
+	                    echo "$root was updated"
+	                    teardown "$root"
+                            setup
+	                    track-new-files
+                            show-failed
+	                    ;;
+                    esac
+		done < "$SETUP_TMPDIR/inotify-out"
+            }
+	fi
+
+	init-setup
+	if [ "$watch_sources" ]; then
+            track-new-files 
+            rebuild-saved-files
+	else
+            show-failed && Setup.isCycleFree
+	fi
+	;;
+esac

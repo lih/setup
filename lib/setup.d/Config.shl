@@ -1,0 +1,59 @@
+#!/bin/bash
+Setup.require base
+Setup.provide Config 0.1
+
+: ${CONFIG_PREFIX=/$SETUP_PREFIX.config}
+
+declare -gA CONFIG_MANIFESTS=( )
+
+function Config.param() {
+    local relpath fullpath
+    case "$1" in
+	/*) relpath="$CONFIG_PREFIX/$1.conf";;
+	*)  relpath="/$SETUP_PREFIX.config/$1.conf";;
+    esac
+    fullpath="$SETUP_ROOT$relpath"
+    mkdir -p "${fullpath%/*}"
+    if (($# == 1)); then
+	printf "%s\n" "$relpath"
+    else
+	local name="$1"; shift
+	while (( $# > 0 )); do
+	    case "$1" in
+		:)
+		    if [ ! -e "$fullpath" ]; then
+			local param
+			if param="$(Setup.params "$name")"; then :
+			else
+			    read -p "Please enter ${*:2} ('$name'): " param
+			fi
+			echo "$param" > "$fullpath"
+		    fi
+		    break
+		    ;;
+		+)
+		    local arg
+		    for arg in "${@:2}"; do
+			if grep -qxF "$arg" "$fullpath"; then :; else
+			    printf "%s\n" "$arg"
+			fi
+		    done >> "$fullpath"
+		    break
+		    ;;
+	    esac
+	done
+    fi
+}
+function Config.manifest() {
+    local manifest="$(Config.param "$1.manifest")"
+    if [ -z "${CONFIG_MANIFESTS[$1]}" ]; then
+	CONFIG_MANIFESTS[$1]=1
+	printf '' > "$SETUP_ROOT$manifest"
+	if Setup.params -"$1"; then
+	    prepare ".build/$1" = Target %@"$manifest"
+	fi
+    fi
+    Config.param "$1.manifest" + "${@:2}"
+    teardown "$manifest"
+}
+function Target() { mkpdir "$1"; printf "%s\n" "${@:2}" > "$1"; }

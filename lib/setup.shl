@@ -1,18 +1,39 @@
 #!/bin/bash
+## Variable SETUP_JOBS: The maximum number of parallel jobs to run
+## Constant SETUP_ROOT: The path from which the master Setup script was run
+## Constant SETUP_PREFIX: A subpath from `$SETUP_ROOT` to the current
+##   Setup directory (`$PWD == $SETUP_ROOT/$SETUP_PREFIX`)
+## Variable SETUP_DEFAULT_TIMESTAMP_MODE: The default timestamp mode
+##   that 'setup' will use to detect if a file has been
+##   changed. Setting it to 'fingerprint' will cause every file in the
+##   build to be fingerprinted. A fingerprinted file will not trigger
+##   a rebuild if its contents haven't changed since the last setup.
+## Constant SETUP_FINGERPRINT_FILE: The name of the fingerprint file from $SETUP_ROOT
 declare -g \
 	SETUP_JOBS=8 \
+	SETUP_FINGERPRINT_FILE=..setup.fp \
         SETUP_STATE_FILE= \
         SETUP_ROOT="$PWD" \
 	SETUP_CMDSIZE=0 \
 	SETUP_PREFIX= \
 	SETUP_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/setup.XXXXXXXX")" \
-        SETUP_MATCH_HOOKS_N=0
+	SETUP_MATCH_HOOKS_N=0 \
+	SETUP_DEFAULT_TIMESTAMP_MODE=timestamp
+
+## Array SETUP_FAILED: A list of all the files that failed to be
+##   generated during the last call to the 'setup' function
+## Array SETUP_SOURCE_FILES: A list of all the files that were
+##   detected to be source files, either by already existing and not
+##   having a build rule, or by having a build rule with no
+##   dependencies
 declare -ga \
 	SETUP_FAILED=( ) \
         SETUP_SOURCE_FILES=( ) \
         SETUP_AUTO_DEPEND_HOOKS=( ) \
         SETUP_ATEXIT_COMMANDS=( ) \
         SETUP_DATE_COPROC=( )
+
+## Hash table SETUP_MOD_HELP: An array from module names to their documentation
 declare -gA \
 	SETUP_STATE=( ) \
 	SETUP_LEAVES=( ) \
@@ -43,6 +64,22 @@ function Setup.log.CRIT() { printf "[CRIT:${BASHPID:-$$}]: %s\n" "$*" >&2; }
 
 function Setup.log() { Setup.log."$1" "${@:2}"; }
 function Setup.trace() { Setup.log INFO "$@" >&2; "$@"; }
+
+## Function: Setup.atexit EXPR EXPR...
+##   This function declares that the EXPRs will be executed when the
+##   program ends (for cleanups and such)
+function Setup.atexit() {
+    if (( $# == 0 )); then
+	local hook
+	for hook in "${SETUP_ATEXIT_COMMANDS[@]}"; do
+            eval "$hook"
+	done 
+    else
+	SETUP_ATEXIT_COMMANDS+=( "$@" )
+    fi
+}
+trap Setup.atexit EXIT
+Setup.atexit 'rm -rf "$SETUP_TMPDIR"' Setup.fingerprint.save
 
 function Setup.startDateCoproc() {
     mkfifo "$SETUP_TMPDIR"/{date-in,date-out}
@@ -92,8 +129,7 @@ EOF
 	    date -r "$file" +"%s 10#%N"
         done
     fi <&"$xin" >&"$xout" &
-    local pid="$!"
-    
+    Setup.atexit "{ kill $!; } >/dev/null 2>&1"
     SETUP_DATE_COPROC=( "$xout" "$xin" "$pid" )
 }
 Setup.startDateCoproc
@@ -190,6 +226,69 @@ function Setup.recipeHook() {
         prepare "${args[@]}"
     }
 }
+function Setup.hash() {
+    local -a fp=( $(sha256sum "$SETUP_ROOT/$1") )
+    printf "%s\n" "$fp"
+}
+
+## Function: Setup.set-timestamp-mode (timestamp|fingerprint) FILE...
+function Setup.set-timestamp-mode() {
+    local mode="$1" arg
+    shift
+    for arg; do
+	SETUP_STATE[$arg.timestamp-mode]="$mode"
+    done
+}
+function Setup.updateSourceStamps() {
+    local src stamp
+    for src in "${SETUP_SOURCE_FILES[@]}"; do
+        Setup.getDate "$src" stamp
+        if [[ "${SETUP_STATE[$src.needed]}" == true ]] \
+               && Setup.timestamp.olderThan ${SETUP_STATE[$src.timestamp]:-0 0} $stamp; then
+            teardown "$src"
+        fi
+        SETUP_STATE[$src.timestamp]="$stamp"
+	if [ "${SETUP_STATE[$src.timestamp-mode]}" == fingerprint ]; then
+	    Setup.updateFingerprint "$src"
+	fi
+    done
+}
+function Setup.fingerprint.save() {
+    if (( ${#SETUP_FINGERPRINT[@]} > 0 )); then
+	declare -p SETUP_FINGERPRINT | sed "s/^declare/declare -g/" > "$SETUP_FINGERPRINT_FILE"
+    fi
+}
+if [ -r "$SETUP_FINGERPRINT_FILE" ]; then
+    source "$SETUP_FINGERPRINT_FILE"
+fi
+function Setup.updateFingerprint() {
+    SETUP_FINGERPRINT[$1.old]="${SETUP_FINGERPRINT[$1.new]}"
+    SETUP_FINGERPRINT[$1.new]="$(Setup.hash "$1")"
+}
+function Setup.timestamp.olderThan() {
+    (( $1 < $3 || ($1 == $3 && $2 < $4) ))
+}
+function Setup.fingerprint.olderThan() {
+    [ "${SETUP_FINGERPRINT[$5.old]}" != "${SETUP_FINGERPRINT[$5.new]}" ]
+}
+function Setup.newerThan() {
+    Setup.${SETUP_STATE[$1.timestamp-mode]:-$SETUP_DEFAULT_TIMESTAMP_MODE}.olderThan $2 $3 ${SETUP_STATE[$1.timestamp]} $1
+}
+function Setup.isUpToDate() {
+    local dst="$1" arg tsmode; shift
+    for arg; do
+	if [ "${arg:0:1}" != - ]; then
+	    tsmode="${SETUP_STATE[$arg.timestamp-mode]:-$SETUP_DEFAULT_TIMESTAMP_MODE}"
+            if [[ ( "$tsmode" == timestamp && "$SETUP_ROOT/$dst" -ot "$SETUP_ROOT/$arg" )
+	       || ( "$tsmode" == fingerprint && "${SETUP_FINGERPRINT[$arg.old]}" != "${SETUP_FINGERPRINT[$arg.new]}" ) ]]
+	    then
+		return 1
+	    fi
+	fi
+    done
+    [ -e "$SETUP_ROOT/$dst" ]
+}
+
 function Setup.runDependHooks() {
     [ "${SETUP_STATE[$1.can]:+x}" == x ] || {
 	for hook in Setup.recipeHook "${SETUP_AUTO_DEPEND_HOOKS[@]}"; do
@@ -201,6 +300,9 @@ function Setup.runDependHooks() {
 	    SETUP_STATE[$1.can]="$1"
 	    SETUP_STATE[$1.status]=2:done
 	    SETUP_SOURCE_FILES+=( "$1" )
+	    if [ "${SETUP_STATE[$1.timestamp-mode]}" == fingerprint ]; then
+		Setup.updateFingerprint "$1"
+	    fi
 	}
     } || {
         Setup.log CRIT "Missing dependency: $1"
@@ -313,25 +415,6 @@ function Setup.primeCan() {
         fi
     done
 }
-
-function Setup.updateSourceStamps() {
-    local src stamp
-    for src in "${SETUP_SOURCE_FILES[@]}"; do
-        Setup.getDate "$src" stamp
-        if [[ "${SETUP_STATE[$src.needed]}" == true ]] \
-               && Setup.ts.olderThan ${SETUP_STATE[$src.timestamp]:-0 0} $stamp; then
-            teardown "$src"
-        fi
-        SETUP_STATE[$src.timestamp]="$stamp"
-    done
-}
-function Setup.isUpToDate() {
-    local dst="$1" arg; shift
-    for arg; do
-        if [[ "$arg" != -* && "$SETUP_ROOT/$dst" -ot "$SETUP_ROOT/$arg" ]]; then return 1; fi
-    done
-    [ -e "$SETUP_ROOT/$dst" ]
-}
 function Setup.runLeaves() {
     local leaf prog
     local -a args hargs dst
@@ -356,17 +439,7 @@ function Setup.runLeaves() {
     done
     SETUP_LEAVES=( )
 }
-function Setup.fingerprint() {
-    local arg
-    for arg; do
-	SETUP_STATE[$arg.ts-mode]=fingerprint
-	: ${SETUP_FINGERPRINT[$arg]:=0 0}
-    done
-}
-function Setup.ts.olderThan() {
-    (( $1 < $3 || ($1 == $3 && $2 < $4) ))
-}
-function Setup.ts() { :; }
+
 function Setup.need() {
     if [ "${SETUP_STATE[$1.needed]}" != true ]; then
 	SETUP_STATE[$1.needed]=true
@@ -382,6 +455,10 @@ function Setup.need() {
             Setup.getDate "$SETUP_ROOT/$1" stamp
             SETUP_STATE[$1.timestamp]="$stamp"
         fi
+	if [[ "${SETUP_STATE[$1.timestamp-mode]}" == fingerprint
+	   && -e "$SETUP_ROOT/$1" ]]; then
+	    Setup.updateFingerprint "$1"
+	fi
         case "${SETUP_STATE[$1.status]}" in
             0:defined) arrs=( args );;
             *)         arrs=( full-args hidden-args );;
@@ -400,7 +477,7 @@ function Setup.need() {
                         return 1                        
                     }
 		    if [[ "${SETUP_STATE[$next.status]}" == 2:done ]] \
-			       && Setup.ts.olderThan $stamp ${SETUP_STATE[$next.timestamp]}; then
+			       && Setup.newerThan "$next" $stamp; then
                         if [[ "$arr" == hidden-args || ( "$arr" == args && "$rawnext" == @* ) ]]; then
 			    nextEdgeType=0:defined
 			else
@@ -491,7 +568,7 @@ function Setup.isCycleFree.from() {
     fi
 }
 
-# Usage: Setup.isCycleFree
+## Function: Setup.isCycleFree
 function Setup.isCycleFree() {
     local -A visited=( ) has_cycle=( )
     local -a cycle_nodes=( )
@@ -515,9 +592,9 @@ function Setup.isCycleFree() {
     done
 }
 
-# Usage: Setup.hook FUNCTION...
+## Function: Setup.hook FUNCTION...
 function Setup.hook() { SETUP_AUTO_DEPEND_HOOKS=( "$@" "${SETUP_AUTO_DEPEND_HOOKS[@]}" ); }
-# Usage: Setup.params [PARAM|-PARAM]...
+## Function: Setup.params [PARAM|-PARAM]...
 function Setup.params() {
     local tgt
     for tgt; do
@@ -529,10 +606,24 @@ function Setup.params() {
     return 1
 }
 
-# Usage: Setup.state-file PATH
+function Setup.state-file.save() {
+    if [ -n "$SETUP_STATE_FILE" ]; then
+	Setup.dumpState >"$SETUP_STATE_FILE" &
+        (
+	    for i in "${!SETUP_STATE[@]}"; do
+                if [[ "$i" != *.needed ]]; then unset "SETUP_STATE[$i]"; fi
+	    done
+	    hash=( $(sha256sum <<< "${!SETUP_PARAMS[@]}") )
+	    declare -p SETUP_STATE | sed -r 's/^declare[^=]*\s([^ =]+)=/\1+=/' \
+                                         >"$SETUP_STATE_FILE.$hash"
+        ) &
+    fi
+}
+## Function: Setup.state-file PATH
 function Setup.state-file() {
     if [ -z "$SETUP_STATE_FILE" ]; then
 	SETUP_STATE_FILE="$1"
+	Setup.atexit Setup.state-file.save
 	if [ -r "$SETUP_STATE_FILE" ]; then
 	    local old_cmdsize="$SETUP_CMDSIZE"
 	    source "$SETUP_STATE_FILE"
@@ -571,7 +662,7 @@ function Setup.use.cmpVer() {
     done
     return 0
 }
-# Usage: Setup.use (MODULE[:MIN_VERSION[:MAX_VERSION]])...
+## Function: Setup.use (MODULE[:MIN_VERSION[:MAX_VERSION]])...
 function Setup.use() {
     local mod minver maxver
     for mod; do
@@ -583,7 +674,7 @@ function Setup.use() {
 	    if [ -e "Setup.d/$mod.shl" ]; then
 		source "Setup.d/$mod.shl"
 	    elif [ -e "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" ]; then
-		source "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl" "Setup.d/$mod.shl"
+		source "$SETUP_INSTALL_DIR/lib/setup.d/$mod.shl"
 	    else
 		Setup.log CRIT "Error: could not locate a module source for '$mod'"
 		exit 1
@@ -598,14 +689,19 @@ function Setup.use() {
 	fi
     done
 }
-# Usage: Setup.require (MODULE[:MIN_VERSION[:MAX_VERSION]])...
+## Function: Setup.require (MODULE[:MIN_VERSION[:MAX_VERSION]])...
 function Setup.require() { Setup.use "$@"; }
-# Usage: Setup.provide MODULE VERSION
+
+## Function: Setup.provide MODULE VERSION
+##   Mandatory in a module file. This function declares the module to
+##   the Setup system so that it may verify its version and provide
+##   its documentation
 function Setup.provide() {
     SETUP_MODULES[$1]="$2";
-    SETUP_MOD_HELP[$1]="$(sed -n 's/^# Usage: //p' "${BASH_SOURCE[1]}")"
+    SETUP_MOD_HELP[$1]="$(sed -rn 's/^## //p' "${BASH_SOURCE[1]}")"
 }
-# Usage: Setup.load SCRIPT PARAM...
+
+## Function: Setup.load SCRIPT PARAM...
 function Setup.load() {
     local path file
 
@@ -628,36 +724,51 @@ function Setup.load() {
     fi
 }
 
-function Setup.atexit() {
-    if [ -n "$SETUP_STATE_FILE" ]; then
-	Setup.dumpState >"$SETUP_STATE_FILE" &
-        (
-            for i in "${!SETUP_STATE[@]}"; do
-                if [[ "$i" != *.needed ]]; then unset "SETUP_STATE[$i]"; fi
-            done
-            hash=( $(sha256sum <<< "${!SETUP_PARAMS[@]}") )
-            declare -p SETUP_STATE | sed -r 's/^declare[^=]*\s([^ =]+)=/\1+=/' \
-                                         >"$SETUP_STATE_FILE.$hash"
-        ) &
-    fi
-    rm -rf "$SETUP_TMPDIR"
-    kill "${SETUP_DATE_COPROC[2]}"
-    local hook
-    for hook in "${SETUP_ATEXIT_COMMANDS[@]}"; do
-        eval "$hook"
+function Setup.extract.recurse() {
+    local target arg
+    local -a tgts args fileargs
+    for target; do
+	if [[ "${SETUP_STATE[$target.status]}" == 2:done && "${visited[$target]+x}" == '' ]]; then
+	    Setup.getArr tgts "$target.targets"
+	    Setup.getArr args "$target.full-args"
+	    for arg in "$target" "${tgts[@]}"; do visited[$arg]=1; done
+	    for arg in "${args[@]#*:}"; do
+		if [[ "$arg" != -* ]]; then fileargs+=( "$arg" ); fi
+	    done
+	    if [ -n "${SETUP_STATE[$target.cmd]}" ]; then
+		printf "%s: %s\n\t%s %s %s\n\n" "${tgts[*]}" "${fileargs[*]}" \
+		       "${SETUP_STATE[$target.cmd]}" "${tgts[*]}" "${args[*]#*:}"
+		Setup.extract.recurse "${fileargs[@]}"
+	    fi
+	fi
     done
 }
-trap Setup.atexit EXIT
+## Function: Setup.extract TARGET...
+function Setup.extract() {
+    local -A visited=( )
+    Setup.extract.recurse "$@"
+}
 
-# Usage: prepare FILE... = COMMAND [FILE|@FILE|-FLAG]...
+## Function: prepare FILE... = COMMAND (FILE|@FILE|-FLAG)...
 function prepare() {
-    local -a targets
+    local -a targets fptargets
+    local i=0
     while [ "$1" != '=' ]; do
-        targets+=( "$1" )
+	if [[ "$1" == %* ]]; then
+	    fptargets+=( "$i" )
+	    target="${1#%}"
+	else
+	    target="$1"
+	fi
+        targets+=( "$target" )
         shift
+	((i++))
     done
     shift
     Setup.addPrefix targets
+    for i in "${fptargets[@]}"; do
+	Setup.set-timestamp-mode fingerprint "${targets[i]}"
+    done
     local can="$targets" 
     if [ "${SETUP_STATE[$can.can]:+x}" == '' ]; then
 	local arg tgt depc=0 nflags=0
@@ -671,8 +782,21 @@ function prepare() {
 	fi
         Setup.setVal "$can.timestamp" "0 0"
 	shift
-	local -a args=( "$@" )
+	local -a args=( ) fpargs=( )
+	i=0
+	for arg; do
+	    if [[ "$arg" == %* ]]; then
+		arg="${arg#%}"
+		fpargs+=( "$i" )
+	    fi
+	    args+=( "$arg" )
+	    ((i++))
+	done
 	Setup.addPrefix args
+	for i in "${fpargs[@]}"; do
+	    local tmp="${args[i]#@}"
+	    Setup.set-timestamp-mode fingerprint "${tmp%%\{*\}}"
+	done
 	Setup.setArr "$can.args" "${args[@]}"
 	for arg in "${args[@]}"; do
 	    case "$arg" in
@@ -705,22 +829,27 @@ function prepare() {
     fi
     Setup.need "$can"
 }
-# Usage: prepare-match PATTERN = COMMAND [FILE|@FILE|-FLAG]...
+## Function: prepare-match PATTERN = COMMAND (FILE|@FILE|-FLAG)...
 function prepare-match() {
+    local re="$1" pref=
+    if [[ "$re" == %* ]]; then
+	pref=%
+	re="${re#%}"
+    fi
     local -a rest=( "${@:3}" )
     rest=( "${rest[@]/#/\"}" )
     rest=( "${rest[@]/%/\"}" )
     eval "function Setup.matchHook.$SETUP_MATCH_HOOKS_N() { 
     local file=\"\$1\"
-    [[ \"\$file\" =~ ^/$1\$ ]] && {
+    [[ \"\$file\" =~ ^/$re\$ ]] && {
         set -- \"\${BASH_REMATCH[@]:1}\"
-        prepare \"\$file\" = ${rest[*]}
+        prepare $pref\"\$file\" = ${rest[*]}
     }
 }"
     Setup.hook "Setup.matchHook.$SETUP_MATCH_HOOKS_N"
     ((SETUP_MATCH_HOOKS_N++))
 }
-# Usage: recipe FILE... = COMMAND [FILE|@FILE|-FLAG]...
+## Function: recipe FILE... = COMMAND [FILE|@FILE|-FLAG]...
 function recipe() {
     local -a tgts=( )
     while [ "$1" != '=' ]; do
@@ -736,7 +865,7 @@ function recipe() {
         SETUP_RECIPES[$tgt]="${recipe#*=}"
     done
 }
-# Usage: setup TARGET...
+## Function: setup TARGET...
 function setup() {
     local now="$(date +"%s 10#%N")"
 
@@ -762,13 +891,15 @@ function setup() {
 	Setup.need "$arg" || return
     done
 
-    local nl="${#SETUP_LEAVES[@]}" can stat ret=0
+    local nl="${#SETUP_LEAVES[@]}" can stat uptodate ret=0
     Setup.runLeaves
     while ((nl>0)) && {
 	      sz=${#SETUP_UPTODATE[@]};
+	      uptodate=false
 	      ((sz>0)) && {
 		  msg="${SETUP_UPTODATE[sz-1]} 0"
 		  unset SETUP_UPTODATE[sz-1]
+		  uptodate=true
 	      } || Setup.receive $SETUP_MASTER msg
 	  }; do
         Setup.log INFO "[MASTER] received $msg"
@@ -803,6 +934,10 @@ function setup() {
 
 		SETUP_STATE[$can.status]='2:done'
 		SETUP_STATE[$can.timestamp]="$now"
+		if [[ "$uptodate" == false
+		   && "${SETUP_STATE[$can.timestamp-mode]}" == fingerprint ]]; then
+		    Setup.updateFingerprint "$can"
+		fi
                 ((nl+=${#SETUP_LEAVES[@]}))
                 Setup.runLeaves
                 ;;
@@ -824,12 +959,12 @@ function setup() {
 
     return "$ret"
 }
-# Usage: teardown SOURCE...
+## Function: teardown SOURCE...
 function teardown() {
-    local -a nexts 
+    local -a nexts files=( "$@" )
     local next file
-
-    for file; do
+    Setup.addPrefix files
+    for file in "${files[@]}"; do
         Setup.getArr nexts "$file.next-defined"
         for next in "${nexts[@]}"; do
             if [[ "${SETUP_STATE[$next.status]}" > 0:defined ]]; then
@@ -851,4 +986,4 @@ function teardown() {
     done
 }
 
-Setup.provide Setup 1.0.0.1
+Setup.provide Setup 1.1
