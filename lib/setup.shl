@@ -73,7 +73,7 @@ function Setup.atexit() {
 	local hook
 	for hook in "${SETUP_ATEXIT_COMMANDS[@]}"; do
             eval "$hook"
-	done 
+	done >/dev/null 2>&1
     else
 	SETUP_ATEXIT_COMMANDS+=( "$@" )
     fi
@@ -222,8 +222,8 @@ function Setup.addPrefix() {
 
 function Setup.recipeHook() {
     [ "${SETUP_RECIPES[${1#/}]:+x}" == 'x' ] && {
-        local -a args="${SETUP_RECIPES[${1#/}]}"
-        prepare "${args[@]}"
+        eval "${SETUP_RECIPES[${1#/}]}"
+        prepare "${__recipe_args[@]}"
     }
 }
 function Setup.hash() {
@@ -858,11 +858,10 @@ function recipe() {
     done
     shift
     Setup.addPrefix tgts
-    local -a args=( "${tgts[@]/#//}" = "$@" )
-    local tgt recipe
-    recipe="$(declare -p args)"
+    local -a __recipe_args=( "${tgts[@]/#//}" = "$@" )
+    local tgt recipe="$(declare -p __recipe_args SETUP_PREFIX)"
     for tgt in "${tgts[@]}"; do
-        SETUP_RECIPES[$tgt]="${recipe#*=}"
+        SETUP_RECIPES[$tgt]="$recipe"
     done
 }
 ## Function: setup TARGET...

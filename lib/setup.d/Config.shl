@@ -50,10 +50,9 @@ function Config.manifest() {
 	CONFIG_MANIFESTS[$1]=1
 	printf '' > "$SETUP_ROOT$manifest"
 	if Setup.params -"$1"; then
-	    prepare ".build/$1" = Target %@"$manifest"
+	    recipe ".build/$1" = Target %@"$manifest"
 	fi
     fi
     Config.param "$1.manifest" + "${@:2}"
-    teardown "$manifest"
 }
 function Target() { mkpdir "$1"; printf "%s\n" "${@:2}" > "$1"; }
