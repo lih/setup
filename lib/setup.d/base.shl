@@ -2,7 +2,16 @@
 Setup.provide base 1.0
 
 ## Function: mkpdir FILE...
-function mkpdir() { mkdir -p $(dirname "$@"); }
+function mkpdir() {
+    local -a alldirs=( $(dirname "$@") ) missing
+    local dir
+    for dir in "${alldirs[@]}"; do
+        if [ ! -e "$dir" ]; then
+            missing+=( "$dir" )
+        fi
+    done
+    [ ${#missing[@]} -eq 0 ] || mkdir -p "${missing[@]}"
+}
 
 ## Function: Trigger DEST -COMMAND ARG...
 function Trigger() { mkpdir "$1"; eval "${2#-}" >"$1" 2>&1; }

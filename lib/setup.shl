@@ -42,7 +42,8 @@ declare -gA \
         SETUP_MOD_HELP=( ) \
         SETUP_LOADED=( ) \
         SETUP_PARAMS=( ) \
-	SETUP_FINGERPRINT=( )
+	SETUP_FINGERPRINT=( ) \
+        SETUP_RECIPES=( )
 
 shopt -s extglob
 
@@ -72,7 +73,7 @@ function Setup.atexit() {
 	local hook
 	for hook in "${SETUP_ATEXIT_COMMANDS[@]}"; do
             eval "$hook"
-	done 
+	done >/dev/null 2>&1
     else
 	SETUP_ATEXIT_COMMANDS+=( "$@" )
     fi
@@ -219,6 +220,12 @@ function Setup.addPrefix() {
     fi
 }
 
+function Setup.recipeHook() {
+    [ "${SETUP_RECIPES[${1#/}]:+x}" == 'x' ] && {
+        eval "${SETUP_RECIPES[${1#/}]}"
+        prepare "${__recipe_args[@]}"
+    }
+}
 function Setup.hash() {
     local -a fp=( $(sha256sum "$SETUP_ROOT/$1") )
     printf "%s\n" "$fp"
@@ -284,7 +291,7 @@ function Setup.isUpToDate() {
 
 function Setup.runDependHooks() {
     [ "${SETUP_STATE[$1.can]:+x}" == x ] || {
-	for hook in "${SETUP_AUTO_DEPEND_HOOKS[@]}"; do
+	for hook in Setup.recipeHook "${SETUP_AUTO_DEPEND_HOOKS[@]}"; do
 	    "$hook" "/$1" && return
         done
         false
@@ -841,6 +848,21 @@ function prepare-match() {
 }"
     Setup.hook "Setup.matchHook.$SETUP_MATCH_HOOKS_N"
     ((SETUP_MATCH_HOOKS_N++))
+}
+## Function: recipe FILE... = COMMAND [FILE|@FILE|-FLAG]...
+function recipe() {
+    local -a tgts=( )
+    while [ "$1" != '=' ]; do
+        tgts+=( "$1" )
+        shift
+    done
+    shift
+    Setup.addPrefix tgts
+    local -a __recipe_args=( "${tgts[@]/#//}" = "$@" )
+    local tgt recipe="$(declare -p __recipe_args SETUP_PREFIX)"
+    for tgt in "${tgts[@]}"; do
+        SETUP_RECIPES[$tgt]="$recipe"
+    done
 }
 ## Function: setup TARGET...
 function setup() {

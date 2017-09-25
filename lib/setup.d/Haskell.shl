@@ -21,7 +21,7 @@ Config.param /haskell/local-packages : a list of package source directories
 
 GHC_VERSION="$(ghc --version)"
 GHC_VERSION="${GHC_VERSION#* version }"
-GHC_VNUM="${GHC_VERSION:0:1}${GHC_VERSION:2:2}"
+GHC_VNUM="$(IFS=. ver=( $GHC_VERSION ); printf "%d%02d" ${ver[0]} ${ver[1]})"
 
 function Hackage.get() {
     local pkg="${2#-}"
@@ -251,7 +251,7 @@ function HS.get() {
     local name="$(< "$3")"
     mkpdir "$1"
     case "$name" in
-	*.hsc) hsc2hs -o "$1" <(tar -xzOf "$2" "$name");;
+	*.hsc) hsc2hs -o "$1" -I"$SETUP_ROOT$HS_POOL" <(tar -xzOf "$2" "$name");;
 	*.hs)  tar -xzOf "$2" "$name" > "$1";;
     esac
 }
@@ -324,7 +324,7 @@ function HS.includes() {
 }
 
 function HS.isLocalMod() {
-    local modpath=( "$SETUP_ROOT$HS_SRC/"*/*"/source/$1.hs" )
+    local modpath=( "$SETUP_ROOT$HS_SRC/"*/*"/source/$1."${2:-hs} )
     [ -e "$modpath" ] && {
 	modpath="${modpath#$SETUP_ROOT$HS_SRC/}"
 	HS_MOD_PATH="${modpath%/source/*}"
@@ -387,7 +387,7 @@ function HS.auto_files() {
 		    }
 		fi;;
 	    "$HS_DEP"|"$HS_POOL"|"$HS_OBJ")
-		[[ "$path" =~ ^(.*)\.((c-)?pkg-name|(c-)?pkg\.file|hs(\.ar-path|pp(\.files)?|)|depends|(c-)?o(\.(c-)?files)?|full-o\.files|hi|options\.file|full-deps(\.files)?|pkg-deps(\.files|\.local)?|[ch](-sources(\.files)?|\.ar-path|)|incs|full-incs(\.files)?|bin-(hs|c)-o\.files)$ ]] && {
+		[[ "$path" =~ ^(.*)\.((c-)?pkg-name|(c-)?pkg\.file|hs(c?\.ar-path|pp(\.files)?|c?)|depends|(c-)?o(\.(c-)?files)?|full-o\.files|hi|options\.file|full-deps(\.files)?|pkg-deps(\.files|\.local)?|[ch](-sources(\.files)?|\.ar-path|)|incs|full-incs(\.files)?|bin-(hs|c)-o\.files)$ ]] && {
 		    local mod="${BASH_REMATCH[1]}" ext="${BASH_REMATCH[2]}"
 		    case "$root:$ext"	in
 			"$HS_DEP":pkg-name)
@@ -408,14 +408,23 @@ function HS.auto_files() {
 				ghcautoconf) prepare "$1" = HS.GHCAutoConf;;
 				*)           prepare "$1" = Tar.get @"$HS_DEP/$mod.c-pkg.file" "$HS_DEP/$mod.h.ar-path"
 			    esac;;
-			"$HS_DEP":hs.ar-path)	prepare "$1" = Tar.find -"$mod\\.hsc\\?\$" @"$HS_DEP/$mod.pkg.file";;
+
+                        "$HS_DEP":hs.ar-path)	prepare "$1" = Tar.find -"$mod\\.hs\$" @"$HS_DEP/$mod.pkg.file";;
 			"$HS_POOL":hs)
 			    if HS.isLocalMod "$mod"; then
 				prepare "$1" = Copy "$HS_SRC/$HS_MOD_PATH/source/$mod.hs"
  			    else
 				prepare "$1" = HS.get @"$HS_DEP/$mod.pkg.file" "$HS_DEP/$mod.hs.ar-path"
 			    fi;;
-			"$HS_DEP":hspp.files)           prepare "$1" = Foreach -'$HS_POOL/$word' "$HS_DEP/$mod.hs.full-incs";;
+
+                        "$HS_DEP":hsc.ar-path)	prepare "$1" = Tar.find -"$mod\\.hsc\$" @"$HS_DEP/$mod.pkg.file";;
+                        "$HS_POOL":hsc)
+                            if HS.isLocalMod "$mod" hsc; then
+				prepare "$1" = Copy "$HS_SRC/$HS_MOD_PATH/source/$mod.hsc"
+ 			    else
+				prepare "$1" = Tar.get @"$HS_DEP/$mod.pkg.file" "$HS_DEP/$mod.hsc.ar-path"
+			    fi;;
+                        "$HS_DEP":hspp.files)           prepare "$1" = Foreach -'$HS_POOL/$word' "$HS_DEP/$mod.hs.full-incs";;
 			"$HS_POOL":hspp)		prepare "$1" = HS.pp "$HS_POOL/$mod.hs" "$HS_CONF/macros.h" @"$HS_DEP/$mod.hspp.files";;
 			"$HS_DEP":depends)		prepare "$1" = HS.depends "$HS_POOL/$mod.hspp" "$HS_CONF/base-modules";;
 			"$HS_DEP":pkg-deps.files)	prepare "$1" = Foreach -'$HS_DEP/${word//.//}.pkg-deps' "$HS_DEP/$mod.depends";;

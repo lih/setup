@@ -111,10 +111,18 @@ bstart
             local red=$'\033[31m'
             local yellow=$'\033[33m'
             local def=$'\033[m'
-            local IFS=$'\n'
+            local -a errcmd tmpa
+            local IFSBAK="$IFS"
             for err in "${SETUP_FAILED[@]}"; do
-		printf "${red}Error[%s]: %s %s${def}\n" "${SETUP_STATE[$err.errno]}" "${SETUP_STATE[$err.cmd]}" "$err"
+                errcmd=( "${SETUP_STATE[$err.cmd]}" )
+                Setup.getArr tmpa "$err.targets"
+                errcmd+=( "${tmpa[@]}" )
+                Setup.getArr tmpa "$err.full-args"
+                errcmd+=( "${tmpa[@]#*:}" )
+                printf "${red}Error[%s]: %s${def}\n" "${SETUP_STATE[$err.errno]}"  "${errcmd[*]}"
+                IFS=$'\n'
 		printf "${red}|${yellow} %s${def}\n" $(< "$SETUP_TMPDIR/log/$err.log")
+                IFS="$IFSBAK"
             done >&2
             if (( ${#SETUP_FAILED[@]} == 0 )); then :; else return 1; fi
 	}
