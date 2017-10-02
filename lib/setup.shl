@@ -715,7 +715,7 @@ function Setup.load() {
     if [ "${SETUP_LOADED[$path]+x}" == '' ]; then
         SETUP_LOADED[$path]=1
         local SETUP_PREFIX="${path#/}"
-        eval "SETUP_PARAMS=${old_params#*=}"
+        eval "declare -A SETUP_PARAMS=${old_params#*=}"
         Setup.setArgs "$@"
         pushd "$SETUP_ROOT$path" >/dev/null && {
             source "$file" --

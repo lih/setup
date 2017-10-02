@@ -1,10 +1,9 @@
 #!/usr/bin/setup -f
 Setup.use Pkg
-
 if Setup.params -package; then
     Pkg.package Pkg.files \
-		usr/share/doc/setup/README.md=README.md \
-		$(for file in $(find bin lib -type f); do echo "usr/$file=$file"; done)
+	usr/share/doc/setup/README.md=README.md \
+	$(for file in $(find bin lib -type f); do echo "usr/$file=$file"; done)
 fi
 
 # Local Variables:
