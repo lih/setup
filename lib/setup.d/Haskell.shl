@@ -98,6 +98,13 @@ int main() {
     printf("#define SIZEOF_DOUBLE      %d\n",sizeof(double));
     printf("#define ALIGNMENT_DOUBLE   %d\n",sizeof(double));
 
+    printf("#define SIZEOF_INT        %d\n",sizeof(int));
+    printf("#define ALIGNMENT_INT     %d\n",sizeof(int));
+    printf("#define SIZEOF_LONG       %d\n",sizeof(long));
+    printf("#define ALIGNMENT_LONG    %d\n",sizeof(long));
+    printf("#define SIZEOF_LONG_LONG       %d\n",sizeof(long long));
+    printf("#define ALIGNMENT_LONG_LONG    %d\n",sizeof(long long));
+
     return 0;
 }
 EOF
@@ -235,6 +242,11 @@ function HS.MachDeps() {
 
 EOF
 }
+function HS.StdHeader() {
+    mkpdir "$1"
+    shopt -s globstar
+    cp "/usr/lib/ghc-$GHC_VERSION/"**"/include/"**"/${2#-}.h" "$1"
+}
 function HS.pp() {
     mkpdir "$1"
     cpp -traditional-cpp -undef -DWORLD_IMPORTS -I"$SETUP_ROOT$HS_POOL" -w -include "$3" "$2" > "$1"
@@ -260,7 +272,7 @@ function HS.get.args() {
 }
 function HS.hsc() {
     mkpdir "$1"
-    hsc2hs -o "$1" -I"$SETUP_ROOT$HS_POOL" -D_GNU_SOURCE -i"$SETUP_ROOT/$3" "$2"
+    hsc2hs -o "$1" -I"$SETUP_ROOT$HS_POOL" -D_GNU_SOURCE -DWORLD_IMPORTS -i"$SETUP_ROOT/$3" "$2"
 }
 function HS.pkgMods() {
     local pkg
@@ -327,7 +339,8 @@ EOF
 }
 function HS.includes() {
     mkpdir "$1"
-    sed -rn 's,^\s*#\s*include\s*"(.*\.h)"\s*$,\1,p' "$2" > "$1"
+    sed -rn 's,^\s*#\s*include\s*("(.*\.hs?)"|<(Hs.*\.h)>)\s*$,\2\3,p' "$2" \
+        | if [ -n "$3" ]; then grep -v "${3#-}"; else cat; fi > "$1"
 }
 
 function HS.isLocalMod() {
@@ -353,6 +366,21 @@ function HS.source-dir() {
 	prepare "$HS_DEP/${src%.*}.options.file" = Echo -"/${SETUP_PREFIX}$etcdir/options"
     done
 }
+function Cabal.h-sources() {
+    local IFS="$IFS,"
+    local -a extra=( $(sed -n '/^extra-source-files:/I,/^\S/{s/^extra-source-files:/ /I;/^\S/d;p}' "$2") )
+    local -a idirs=( $(< "$3") )
+    local file dir
+    mkpdir "$1"
+    for file in "${extra[@]}"; do
+        for dir in "${idirs[@]}"; do
+            if [[ "$file" == "$dir"/*.h ]]; then
+                printf "%s\n" "${file#$dir/}"
+                break
+            fi
+        done
+    done > "$1"
+}
 
 Setup.hook HS.auto_files
 function HS.auto_files() {
@@ -373,23 +401,25 @@ function HS.auto_files() {
 		if [ -e "$SETUP_ROOT$HS_SRC/$path" ]; then
 		    prepare "$1" = Copy "$HS_SRC/$path"
 		else
-		    [[ "$path" =~ ^([^/]*)/(package\.(tar\.gz|cabal(\.ar-path)?)|modules|conf.(c-)?manifest|(all-|other-|)extensions|(ext-|ghc-|)options|c-sources|includes)$ ]] && {
+		    [[ "$path" =~ ^([^/]*)/(package\.(tar\.gz|cabal(\.ar-path)?)|modules|conf.(c-)?manifest|(all-|other-|)extensions|(ext-|ghc-|)options|[ch]-sources|includes|include-dirs)$ ]] && {
 			local pkg="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"
 			case "$file" in
-			    package.tar.gz)		prepare "$1" = Hackage.get -"$pkg";;
+			    package.tar.gz)	    prepare "$1" = Hackage.get -"$pkg";;
 			    package.cabal.ar-path)  prepare "$1" = Tar.find -"${pkg%-*}"'\.cabal$' "$HS_PKG/$pkg/package.tar.gz";;
-			    package.cabal)		prepare "$1" = Tar.get "$HS_PKG/$pkg/package.tar.gz" "$HS_PKG/$pkg/package.cabal.ar-path";;
+			    package.cabal)	    prepare "$1" = Tar.get "$HS_PKG/$pkg/package.tar.gz" "$HS_PKG/$pkg/package.cabal.ar-path";;
 			    modules)                prepare "$1" = Cabal.section -'(exposed|other)'-modules "$HS_PKG/$pkg/package.cabal" -',';;
-			    extensions)             prepare "$1" = Cabal.section -extensions "$HS_PKG/$pkg/package.cabal" -,;;
+			    extensions)             prepare "$1" = Cabal.section -'(default-)?'extensions "$HS_PKG/$pkg/package.cabal" -,;;
 			    other-extensions)       prepare "$1" = Cabal.section -other-extensions "$HS_PKG/$pkg/package.cabal" -,;;
 			    c-sources)              prepare "$1" = Cabal.section -c-sources "$HS_PKG/$pkg/package.cabal" -,;;
+			    h-sources)              prepare "$1" = Cabal.h-sources "$HS_PKG/$pkg/"{package.cabal,include-dirs};;
 			    includes)               prepare "$1" = Cabal.section -'(includes|install-includes)' "$HS_PKG/$pkg/package.cabal" -,;;
+			    include-dirs)           prepare "$1" = Cabal.section -include-dirs "$HS_PKG/$pkg/package.cabal" -,;;
 			    all-extensions)         prepare "$1" = Concat "$HS_PKG/$pkg/"{other-,}extensions;;
 			    ghc-options)            prepare "$1" = Cabal.section -ghc-options "$HS_PKG/$pkg/package.cabal";;
-			    ext-options)            prepare "$1" = Foreach -'-X$word' "$HS_PKG/$pkg/all-extensions";;
+			    ext-options)            prepare "$1" = Foreach -'-X$word' "$HS_PKG/$pkg/extensions";;
 			    options)                prepare "$1" = Concat "$HS_PKG/$pkg/"{ext,ghc}-options;;
 			    conf.manifest)          prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/modules";;
-			    conf.c-manifest)        prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/c-sources" "$HS_PKG/$pkg/includes";;
+			    conf.c-manifest)        prepare "$1" = Foreach -'$word:'"$pkg" "$HS_PKG/$pkg/c-sources" "$HS_PKG/$pkg/h-sources" "$HS_PKG/$pkg/includes";;
 			esac
 		    }
 		fi;;
@@ -401,16 +431,18 @@ function HS.auto_files() {
 			    if HS.isLocalMod "$mod"; then
 				prepare "$1" = Echo -"${HS_MOD_PATH//\//-}"
 			    else
-				prepare "$1" = Lookup -"${mod//\//.}" "$HS_CONF/manifest"
+				prepare "$1" = Lookup -"${mod//\//.}:" "$HS_CONF/manifest"
 			    fi;;
 			"$HS_DEP":c-pkg-name)   prepare "$1" = Lookup -"$mod" "$HS_CONF/c-manifest";;
 			"$HS_DEP":pkg.file)	prepare "$1" = Foreach -'$HS_PKG/$word/package.tar.gz' "$HS_DEP/$mod.pkg-name";;
 			"$HS_DEP":c-pkg.file)	prepare "$1" = Foreach -'$HS_PKG/$word/package.tar.gz' "$HS_DEP/$mod.c-pkg-name";;
-			"$HS_DEP":c.ar-path)    prepare "$1" = Tar.find -"$mod\\.c\$" @"$HS_DEP/$mod.c-pkg.file";;
-			"$HS_DEP":h.ar-path)    prepare "$1" = Tar.find -"$mod\\.h\$" @"$HS_DEP/$mod.c-pkg.file";;
+			"$HS_DEP":c.ar-path)    prepare "$1" = Tar.find -'\(^\|/\)'"$mod\\.c\$" @"$HS_DEP/$mod.c.c-pkg.file";;
+			"$HS_DEP":h.ar-path)    prepare "$1" = Tar.find -'\(^\|/\)'"$mod\\.h\$" @"$HS_DEP/$mod.h.c-pkg.file";;
 			"$HS_POOL":c)           prepare "$1" = Tar.get @"$HS_DEP/$mod.c-pkg.file" "$HS_DEP/$mod.c.ar-path";;
 			"$HS_POOL":h)
 			    case "$mod" in
+                                HsBase*|rts/*|Rts*|Stg*|HsFFI|stg/*|ghcconfig|ghcplatform|MachRegs|WCsubst)
+                                    prepare "$1" = HS.StdHeader -"$mod";;
 				MachDeps)    prepare "$1" = HS.MachDeps;;
 				ghcautoconf) prepare "$1" = HS.GHCAutoConf;;
 				*)           prepare "$1" = Tar.get @"$HS_DEP/$mod.c-pkg.file" "$HS_DEP/$mod.h.ar-path"
