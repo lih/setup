@@ -316,7 +316,8 @@ function HS.macros.genPkg() {
 EOF
 }
 function HS.macros() {
-    local -a packages=( $(< "$2") ) core_packages=( $(< "$3") )
+    echo HS.macros "$@"
+    local -a packages=( $(< "$2") $(< "$3") ) core_packages=( $(< "$4") )
     mkpdir "$1"
     {
 	cat <<EOF
@@ -395,7 +396,7 @@ function HS.auto_files() {
 		    c-manifest)         prepare "$1" = Sorted @"$HS_CONF/c-manifest.files";;
 		    base-packages.full) prepare "$1" = HS.fullPkgs "$(Config.param /haskell/base-packages)";;
 		    base-modules)       prepare "$1" = HS.pkgMods "$(Config.param /haskell/base-packages)";;
-		    macros.h)           prepare "$1" = HS.macros "$(Config.param /haskell/packages)" "$HS_CONF/base-packages.full";;
+		    macros.h)           prepare "$1" = HS.macros "$(Config.param /haskell/packages)" "$(Config.param /haskell/local-packages)" "$HS_CONF/base-packages.full";;
 		esac;;
 	    "$HS_PKG")
 		if [ -e "$SETUP_ROOT$HS_SRC/$path" ]; then
