@@ -151,9 +151,10 @@ bstart
 			*,CLOSE_WRITE,*|*,DELETE_SELF,*)
 	                    echo "$root was updated"
 	                    teardown "$root"
+                            SETUP_FAILED=( )
                             setup
-	                    track-new-files
-                            show-failed
+                            track-new-files
+                            show-failed && echo "Compilation finished at $(date)"
 	                    ;;
                     esac
 		done < "$SETUP_TMPDIR/inotify-out"
